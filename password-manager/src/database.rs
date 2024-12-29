@@ -1,4 +1,5 @@
 use rusqlite::{Connection, Result, Row};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::compile_config::DB_PATH;
 
@@ -34,6 +35,17 @@ impl Account {
             url: row.get(4)?,
             description: row.get(5)?,
         })
+    }
+}
+
+impl Drop for Account {
+    fn drop(&mut self) {
+        self.username.zeroize();
+        self.password.zeroize();
+
+        if let Some(ref mut url) = self.url {
+            url.zeroize();
+        }
     }
 }
 
