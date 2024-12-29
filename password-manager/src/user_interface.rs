@@ -1,8 +1,8 @@
-use std::io::{self, Write};
+use std::{io::{self, Write}, process};
 use rusqlite::{Connection, Result, Row};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, list_accounts, update_account, Account, AccountSummary};
+use crate::database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, list_accounts, update_account, verify_master, Account, AccountSummary};
 
 fn print_separator() {
     println!("------------------------------");
@@ -20,6 +20,7 @@ fn display_main_menu() {
 }
 
 pub fn start_ui_loop(conn: Connection) {
+    handle_verify_master(&conn);
     loop {
         display_main_menu();
 
@@ -63,10 +64,11 @@ fn get_user_input() -> String {
 }
 
 fn get_password() -> String {
+    io::stdout().flush().unwrap();
     rpassword::read_password().unwrap()
 }
 
-fn handle_add_account(conn: &Connection) -> Result<()>{
+fn handle_add_account(conn: &Connection) {
     println!("Enter account name (ie. Google, X, Discord): ");
     let name = get_user_input();
 
@@ -89,7 +91,13 @@ fn handle_add_account(conn: &Connection) -> Result<()>{
     // TODO Encrypt username and password before adding
     let account = Account::new(name, username, password, url, description);
 
-    add_account(conn, &account)
+    match add_account(conn, &account) {
+        Ok(_result) => { ()
+        },
+        Err(err) => {
+            println!("Failed to list accounts: {}", err);
+        }
+    }
 }
 
 fn print_account_summary_details(account: &AccountSummary) {
@@ -270,6 +278,33 @@ fn update_account_details(conn: &Connection, account: &mut Account) {
         }
     }
 }
+
+fn handle_verify_master(conn: &Connection) {
+    let mut attempts = 3;
+
+    loop {
+        print!("Enter master username: ");
+        let username = get_user_input();
+        print!("Enter master password: ");
+        let password = get_password();
+
+        match verify_master(conn, &username, &password) {
+            Ok(true) => {
+                println!("Logging in...");
+                break;
+            },
+            Ok(false) | Err(_) => {
+                attempts -= 1;
+                if attempts <= 0 {
+                    println!("Max attempts reached. Exiting...");
+                    process::exit(1);
+                }
+                println!("Invalid credentials. Please try again. {} attempts remaining", attempts);
+            }
+        }
+    }
+}
+
 fn handle_change_master_password(conn: &Connection) {
     unimplemented!()
 }

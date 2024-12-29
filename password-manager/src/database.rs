@@ -67,6 +67,42 @@ impl AccountSummary {
     }
 }
 
+// For now, this will be used to define a set of users who are able to access the passwords
+// TODO Add a way to match masters to their own accounts
+#[derive(Debug)]
+pub struct Master {
+    pub id: i64,
+    pub username: String,
+    pub password: String
+}
+
+impl Master {
+    pub fn new(username: String, password: String) -> Self {
+        Master {
+            id: 0, // Placeholder value, ID will be assigned automatically
+            username,
+            password
+        }
+    }
+
+    // Helper function to map a row to an Account struct
+    fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(Master {
+            id: row.get(0)?,
+            username: row.get(1)?,
+            password: row.get(2)?,
+        })
+    }
+}
+
+impl Drop for Master {
+    fn drop(&mut self) {
+        self.id.zeroize();
+        self.username.zeroize();
+        self.password.zeroize();
+    }
+}
+
 pub fn initialize_db() -> Result<Connection> {
     let conn = Connection::open(DB_PATH)?;
 
@@ -81,10 +117,27 @@ pub fn initialize_db() -> Result<Connection> {
         )",
         [],
     )?;
+    conn.execute(
+        "create table if not exists masters (
+            master integer primary key,
+            username text not null,
+            password text not null
+        )",
+        [],
+    )?;
+    // Insert the default account only if there are no accounts in the table
+    conn.execute(
+        "insert into masters (username, password)
+        select 'default', 'changethis'
+        where not exists (select 1 from masters)",
+        [],
+    )?;
 
     Ok(conn)
 }
 
+// ----------------------------------------------------------------------------
+// Accounts -------------------------------------------------------------------
 
 pub fn add_account(conn: &Connection, account: &Account) -> Result<()> {
     let sql = "INSERT INTO accounts (name, username, password, url, description) 
@@ -200,4 +253,119 @@ pub fn update_account(conn: &Connection, account: &Account) -> Result<()> {
     }
 
     Ok(())
+}
+
+
+// ----------------------------------------------------------------------------
+// Masters --------------------------------------------------------------------
+pub fn add_master(conn: &Connection, master: &Master) -> Result<()> {
+    let sql = "INSERT INTO masters (username, password) 
+                     VALUES (?1, ?2)";
+
+    // Account id assigned automatically
+    let params = rusqlite::params![
+        master.username,
+        master.password
+    ];
+    conn.execute(sql, params)?;
+    Ok(())
+}
+pub fn get_master_by_id(conn: &Connection, id: i64) -> Result<Master> {
+    let sql = "SELECT master, username, password
+                     FROM master WHERE account = ?1";
+    conn.query_row(sql, rusqlite::params![id], |row| {
+        Master::from_row(row)
+    })
+}
+
+pub fn get_master_by_username(conn: &Connection, username: &String) -> Result<Master> {
+    let sql = "SELECT master, username, password
+                     FROM masters WHERE username = ?1";
+    conn.query_row(sql, rusqlite::params![username], |row| {
+        Master::from_row(row)
+    })
+}
+
+pub fn delete_master_by_id(conn: &Connection, id: i64) -> Result<()> {
+    match get_master_by_id(conn, id) {
+        Ok(master) => {
+            let delete_sql = "DELETE FROM masters WHERE master = ?1";
+            conn.execute(delete_sql, rusqlite::params![id])?;
+            
+            println!("Master account deleted: {:?}", master);
+            Ok(())
+        },
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            println!("No master account found with ID: {}", id);
+            Err(rusqlite::Error::QueryReturnedNoRows)
+        },
+        Err(err) => {
+            Err(err)
+        }
+    }
+}
+
+pub fn delete_master_by_username(conn: &Connection, username: &String) -> Result<()> {
+    match get_master_by_username(conn, username) {
+        Ok(master) => {
+            let delete_sql = "DELETE FROM masters WHERE username = ?1";
+            conn.execute(delete_sql, rusqlite::params![username])?;
+            
+            println!("Master account deleted: {:?}", master);
+            Ok(())
+        },
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            println!("No master account found with name: {}", username);
+            Err(rusqlite::Error::QueryReturnedNoRows)
+        },
+        Err(err) => {
+            Err(err)
+        }
+    }
+}
+
+// TODO Test if this works without returing the password
+pub fn list_master_accounts(conn: &Connection) -> Result<Vec<Master>> {
+    let sql = "SELECT master, username FROM masters";
+    let mut stmt = conn.prepare(sql)?;
+
+    let master_iter = stmt.query_map([], |row| Master::from_row(row))?;
+
+    let mut summaries = Vec::new();
+    for master in master_iter {
+        summaries.push(master?);
+    }
+
+    Ok(summaries)
+}
+
+
+pub fn update_master(conn: &Connection, master: &Master) -> Result<()> {
+    let sql = "UPDATE masters 
+               SET username = ?1, password = ?2
+               WHERE master = ?3";
+
+    let params = rusqlite::params![
+        master.username,
+        master.password,
+        master.id
+    ];
+
+    let rows_affected = conn.execute(sql, params)?;
+    if rows_affected == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+
+    Ok(())
+}
+
+pub fn verify_master(conn: &Connection, username: &String, password: &String) -> Result<bool> {
+    let stored_master = get_master_by_username(conn, username)?;
+
+    // TODO Add something to prevent side channel timing attacks
+    if stored_master.password == *password {
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
