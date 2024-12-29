@@ -62,7 +62,7 @@ impl AccountSummary {
         Ok(AccountSummary {
             id: row.get(0)?,
             name: row.get(1)?,
-            description: row.get(5)?
+            description: row.get(2)?
         })
     }
 }
@@ -116,6 +116,44 @@ pub fn get_account_by_name(conn: &Connection, name: &String) -> Result<Account> 
     conn.query_row(sql, rusqlite::params![name], |row| {
         Account::from_row(row)
     })
+}
+
+pub fn delete_account_by_id(conn: &Connection, id: i64) -> Result<()> {
+    match get_account_by_id(conn, id) {
+        Ok(account) => {
+            let delete_sql = "DELETE FROM accounts WHERE account = ?1";
+            conn.execute(delete_sql, rusqlite::params![id])?;
+            
+            println!("Account deleted: {:?}", account);
+            Ok(())
+        },
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            println!("No account found with ID: {}", id);
+            Err(rusqlite::Error::QueryReturnedNoRows)
+        },
+        Err(err) => {
+            Err(err)
+        }
+    }
+}
+
+pub fn delete_account_by_name(conn: &Connection, name: &String) -> Result<()> {
+    match get_account_by_name(conn, name) {
+        Ok(account) => {
+            let delete_sql = "DELETE FROM accounts WHERE name = ?1";
+            conn.execute(delete_sql, rusqlite::params![name])?;
+            
+            println!("Account deleted: {:?}", account);
+            Ok(())
+        },
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            println!("No account found with name: {}", name);
+            Err(rusqlite::Error::QueryReturnedNoRows)
+        },
+        Err(err) => {
+            Err(err)
+        }
+    }
 }
 
 // TODO Add a function for pagination
