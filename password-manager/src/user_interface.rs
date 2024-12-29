@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use rusqlite::{Connection, Result, Row};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, list_accounts, Account, AccountSummary};
+use crate::database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, list_accounts, update_account, Account, AccountSummary};
 
 fn print_separator() {
     println!("------------------------------");
@@ -186,7 +186,89 @@ fn handle_delete_account(conn: &Connection) {
 }
 
 fn handle_update_account(conn: &Connection) {
-    unimplemented!()
+    println!("Enter the account ID or name to update:");
+
+    let input = get_user_input();
+    
+    match input.parse::<i64>() {
+        Ok(id) => {
+            match get_account_by_id(conn, id) {
+                Ok(mut account) => {
+                    update_account_details(conn, &mut account);
+                }
+                Err(_) => {
+                    println!("No account found with ID: {}", id);
+                }
+            }
+        }
+        Err(_) => {
+            let name = input.trim().to_string();
+            match get_account_by_name(conn, &name) {
+                Ok(mut account) => {
+                    update_account_details(conn, &mut account);
+                }
+                Err(_) => {
+                    println!("No account found with name: {}", name);
+                }
+            }
+        }
+    }
+}
+
+// Helper function for handle_update_account()
+fn update_account_details(conn: &Connection, account: &mut Account) {
+    println!("\nCurrent account details:");
+    println!("Name: {}", account.name);
+    println!("Username: {}", account.username);
+    if let Some(url) = &account.url {
+        println!("URL: {}", url);
+    } else {
+        println!("URL: N/A");
+    }
+    if let Some(description) = &account.description {
+        println!("Description: {}", description);
+    } else {
+        println!("Description: N/A");
+    }
+
+    // Step 3: Ask for new values
+    println!("\nEnter the new account name (leave empty to keep current):");
+    let name = get_user_input();
+    let name = if name.is_empty() { account.name.clone() } else { name };
+
+    println!("Enter the new username (leave empty to keep current):");
+    let username = get_user_input();
+    let username = if username.is_empty() { account.username.clone() } else { username };
+
+    println!("Enter the new password (leave empty to keep current):");
+    let password = get_user_input();
+    let password = if password.is_empty() { account.password.clone() } else { password };
+
+    println!("Enter the new URL (leave empty to keep current):");
+    let url = get_user_input();
+    let url = if url.is_empty() { account.url.clone() } else { Some(url) };
+
+    println!("Enter the new description (leave empty to keep current):");
+    let description = get_user_input();
+    let description = if description.is_empty() { account.description.clone() } else { Some(description) };
+
+    let updated_account = Account {
+        id: account.id, // Keep the same ID
+        name,
+        username,
+        password,
+        url,
+        description,
+    };
+
+    match update_account(conn, &updated_account) {
+        Ok(_) => {
+            println!("Account with ID {} was updated successfully.", updated_account.id);
+        }
+        Err(e) => {
+            println!("Failed to update account with ID {}: {:?}", updated_account.id, e);
+        }
+    }
 }
 fn handle_change_master_password(conn: &Connection) {
     unimplemented!()

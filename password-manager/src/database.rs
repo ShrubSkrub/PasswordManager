@@ -179,3 +179,25 @@ pub fn search_accounts_by_id(conn: &Connection, id: i64) -> Result<Vec<AccountSu
 pub fn search_accounts_by_name(conn: &Connection, name: &String) -> Result<Vec<AccountSummary>>{
     unimplemented!()
 }
+
+pub fn update_account(conn: &Connection, account: &Account) -> Result<()> {
+    let sql = "UPDATE accounts 
+               SET name = ?1, username = ?2, password = ?3, url = ?4, description = ?5 
+               WHERE account = ?6";
+
+    let params = rusqlite::params![
+        account.name,
+        account.username,
+        account.password,
+        account.url,
+        account.description,
+        account.id
+    ];
+
+    let rows_affected = conn.execute(sql, params)?;
+    if rows_affected == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+
+    Ok(())
+}
