@@ -1,0 +1,15 @@
+# Ignore target directory
+/target/
+
+# Ignore Cargo.lock for libraries (it's important for applications)
+Cargo.lock
+
+# Ignore IDE or editor files
+.idea/
+.vscode/
+
+# Ignore swap files
+*.swp
+
+# Ignore db
+passwords.db

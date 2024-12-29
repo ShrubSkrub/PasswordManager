@@ -1,0 +1,18 @@
+[package]
+name = "password-manager"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# TODO change to current version
+[dependencies]
+rusqlite = "*"
+bcrypt = "*"
+aes = "*"
+block-modes = "*"
+rand = "*"
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+rpassword = "*"
+zeroize = "*"
