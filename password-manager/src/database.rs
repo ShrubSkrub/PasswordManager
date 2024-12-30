@@ -1,7 +1,9 @@
+use core::hash;
+
 use rusqlite::{Connection, Result, Row};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::compile_config::DB_PATH;
+use crate::{compile_config::DB_PATH, encryption::{hash_master_password, verify_master_password}};
 
 #[derive(Debug)]
 pub struct Account {
@@ -125,12 +127,14 @@ pub fn initialize_db() -> Result<Connection> {
         )",
         [],
     )?;
+
     // Insert the default account only if there are no accounts in the table
+    let default_master_password_hash = hash_master_password(&"changethis".to_string()).expect("Error hashing password!");
     conn.execute(
         "insert into masters (username, password)
-        select 'default', 'changethis'
+        select 'default', ?1
         where not exists (select 1 from masters)",
-        [],
+        rusqlite::params![default_master_password_hash]
     )?;
 
     Ok(conn)
@@ -362,8 +366,7 @@ pub fn update_master(conn: &Connection, master: &Master) -> Result<()> {
 pub fn verify_master(conn: &Connection, username: &String, password: &String) -> Result<bool> {
     let stored_master = get_master_by_username(conn, username)?;
 
-    // TODO Add something to prevent side channel timing attacks
-    if stored_master.password == *password {
+    if verify_master_password(&stored_master.password, &password){
         Ok(true)
     } else {
         Ok(false)

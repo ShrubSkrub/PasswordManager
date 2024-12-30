@@ -2,7 +2,7 @@ use std::{io::{self, Write}, process};
 use rusqlite::{Connection, Result, Row};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, list_accounts, update_account, verify_master, Account, AccountSummary};
+use crate::{compile_config::DEBUG_FLAG, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, list_accounts, update_account, verify_master, Account, AccountSummary}};
 
 fn print_separator() {
     println!("------------------------------");
@@ -64,8 +64,12 @@ fn get_user_input() -> String {
 }
 
 fn get_password() -> String {
-    io::stdout().flush().unwrap();
-    rpassword::read_password().unwrap()
+    if DEBUG_FLAG {
+        get_user_input()
+    } else {
+        io::stdout().flush().unwrap();
+        rpassword::read_password().unwrap()
+    }
 }
 
 fn handle_add_account(conn: &Connection) {
