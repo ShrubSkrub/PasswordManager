@@ -1,6 +1,5 @@
 use std::{io::{self, Write}, process};
-use rusqlite::{Connection, Result, Row};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use rusqlite::Connection;
 
 use crate::{compile_config::DEBUG_FLAG, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, list_accounts, update_account, verify_master, Account, AccountSummary}};
 
