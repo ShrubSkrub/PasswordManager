@@ -1,7 +1,7 @@
 use std::{io::{self, Write}, process};
 use rusqlite::Connection;
 
-use crate::{compile_config::DEBUG_FLAG, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, list_accounts, update_account, verify_master, Account, AccountSummary}};
+use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, list_accounts, update_account, verify_master, Account, AccountSummary}};
 
 fn print_separator() {
     println!("------------------------------");
@@ -286,8 +286,13 @@ fn handle_verify_master(conn: &Connection) {
     let mut attempts = 3;
 
     loop {
-        print!("Enter master username: ");
-        let username = get_user_input();
+        let username = if SINGLE_MASTER_FLAG {
+            "default".to_string()
+        } else {
+            print!("Enter master username: ");
+            get_user_input()
+        };
+
         print!("Enter master password: ");
         let password = get_password();
 
