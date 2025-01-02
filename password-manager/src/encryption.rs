@@ -1,6 +1,6 @@
 use anyhow::{Error, Result};
 use argon2::{
-    password_hash::{PasswordHasher, SaltString}, Argon2, PasswordHash, PasswordVerifier
+    password_hash::{Encoding, PasswordHasher, SaltString}, Argon2, PasswordHash, PasswordVerifier
 };
 use block_padding::generic_array::GenericArray;
 use rand::RngCore;
@@ -22,18 +22,17 @@ pub fn hash_master_password(password: &String) -> Result<String> {
         // For some reason, argon2::password_hash::Error does not implement std::error:Error
         .map_err(|e| anyhow::anyhow!("Password hashing failed: {}", e))?;
 
-    Ok(password_hash.to_string())
+    let hash_string = password_hash.to_string();
+    Ok(hash_string)
 }
 
 
-pub fn verify_master_password(hashed: &String, password: &String) -> bool {
-    match PasswordHash::new(hashed) {
-        Ok(parsed_hash) => {
-            let argon2 = Argon2::default();
+pub fn verify_master_password(stored_b64_hash: &String, password: &String) -> bool {
+    let argon2 = Argon2::default();
 
-            argon2
-                .verify_password(password.as_bytes(), &parsed_hash)
-                .is_ok()
+    match PasswordHash::new(stored_b64_hash) {
+        Ok(parsed_hash) => {
+            argon2.verify_password(password.as_bytes(), &parsed_hash).is_ok()
         }
         Err(_) => false
     }
