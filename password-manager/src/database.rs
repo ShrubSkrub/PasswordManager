@@ -276,7 +276,7 @@ pub fn add_master(conn: &Connection, master: &Master) -> Result<()> {
 }
 pub fn get_master_by_id(conn: &Connection, id: i64) -> Result<Master> {
     let sql = "SELECT master, username, password
-                     FROM master WHERE account = ?1";
+                     FROM masters WHERE master = ?1";
     conn.query_row(sql, rusqlite::params![id], |row| {
         Master::from_row(row)
     })
