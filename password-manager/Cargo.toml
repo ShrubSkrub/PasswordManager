@@ -7,7 +7,7 @@ edition = "2021"
 
 # TODO change to current version
 [dependencies]
-rusqlite = "*"
+rusqlite = "0.32.1"
 bcrypt = "*"
 aes = "*"
 block-modes = "*"
@@ -22,3 +22,4 @@ anyhow = "*"
 rand_core = "*"
 subtle = "2.6"
 aes-gcm = "0.10.3"
+base64 = "0.22.1"

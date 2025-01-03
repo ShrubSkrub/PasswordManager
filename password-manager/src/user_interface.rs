@@ -1,7 +1,7 @@
 use std::{io::{self, Write}, process};
 use rusqlite::Connection;
 
-use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, list_accounts, update_account, verify_master, Account, AccountSummary}};
+use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_id, list_accounts, update_account, verify_master, Account, AccountSummary}, encryption::{self, decrypt_password, encrypt_password, hash_master_password}};
 
 fn print_separator() {
     println!("------------------------------");
@@ -19,6 +19,15 @@ fn display_main_menu() {
 }
 
 pub fn start_ui_loop(conn: Connection) {
+    // For testing
+    let master_password = "changethis".to_string();
+    let master_password_hash = hash_master_password(&master_password).unwrap();
+    let password = "example".to_string();
+    let encrypted_password = encrypt_password(&master_password_hash, &password);
+    println!("Encrypted password: {:?}", encrypted_password);
+    let decrypted_password = decrypt_password(&master_password_hash, &encrypted_password);
+    println!("Decrypted password: {}", decrypted_password);
+
     handle_verify_master(&conn);
     loop {
         display_main_menu();
@@ -72,6 +81,13 @@ fn get_password() -> String {
 }
 
 fn handle_add_account(conn: &Connection) {
+    let master= if SINGLE_MASTER_FLAG {
+        get_master_by_id(conn, 1).expect("Failed to get master")
+    } else {
+        unimplemented!()
+    };
+    let master_password_hash = &master.password;
+
     println!("Enter account name (ie. Google, X, Discord): ");
     let name = get_user_input();
 
@@ -91,8 +107,10 @@ fn handle_add_account(conn: &Connection) {
     // If the user enters an empty string, set description to None
     let description = if description_input.is_empty() { None } else { Some(description_input) };
 
-    // TODO Encrypt username and password before adding
-    let account = Account::new(name, username, password, url, description);
+    // Encrypt username and password before adding
+    let encrypted_password = encrypt_password(master_password_hash, &password);
+
+    let account = Account::new(name, username, encrypted_password, url, description);
 
     match add_account(conn, &account) {
         Ok(_result) => { ()
@@ -112,6 +130,7 @@ fn print_account_summary_details(account: &AccountSummary) {
     }
 }
 
+// TODO Decrypt password before showing
 fn print_account_details(account: &Account) {
     println!("Account Details:");
     println!("ID: {}", account.id);
@@ -263,6 +282,7 @@ fn update_account_details(conn: &Connection, account: &mut Account) {
     let description = get_user_input();
     let description = if description.is_empty() { account.description.clone() } else { Some(description) };
 
+    // TODO Encrypt password before adding
     let updated_account = Account {
         id: account.id, // Keep the same ID
         name,
