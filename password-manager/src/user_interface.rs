@@ -1,7 +1,8 @@
 use std::{io::{self, Write}, process};
 use rusqlite::Connection;
+use zeroize::Zeroize;
 
-use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_id, list_accounts, update_account, verify_master, Account, AccountSummary}, encryption::{self, decrypt_password, encrypt_password, hash_master_password}};
+use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_id, list_accounts, update_account, verify_master, Account, AccountSummary, Master}, encryption::{self, decrypt_password, encrypt_password, hash_master_password}};
 
 fn print_separator() {
     println!("------------------------------");
@@ -19,15 +20,7 @@ fn display_main_menu() {
 }
 
 pub fn start_ui_loop(conn: Connection) {
-    // For testing
-    let master_password = "changethis".to_string();
-    let password = "example".to_string();
-    let encrypted_password = encrypt_password(&master_password, &password);
-    println!("Encrypted password: {:?}", encrypted_password);
-    let decrypted_password = decrypt_password(&master_password, &encrypted_password);
-    println!("Decrypted password: {}", decrypted_password);
-
-    handle_verify_master(&conn);
+    obtain_master_credentials(&conn);
     loop {
         display_main_menu();
 
@@ -80,12 +73,6 @@ fn get_password() -> String {
 }
 
 fn handle_add_account(conn: &Connection) {
-    let master= if SINGLE_MASTER_FLAG {
-        get_master_by_id(conn, 1).expect("Failed to get master")
-    } else {
-        unimplemented!()
-    };
-    let master_password_hash = &master.password;
 
     println!("Enter account name (ie. Google, X, Discord): ");
     let name = get_user_input();
@@ -106,8 +93,9 @@ fn handle_add_account(conn: &Connection) {
     // If the user enters an empty string, set description to None
     let description = if description_input.is_empty() { None } else { Some(description_input) };
 
-    // Encrypt username and password before adding
-    let encrypted_password = encrypt_password(master_password_hash, &password);
+    // Encrypt password before adding
+    let master = obtain_master_credentials(conn);
+    let encrypted_password = encrypt_password(&master.password, &password);
 
     let account = Account::new(name, username, encrypted_password, url, description);
 
@@ -129,13 +117,15 @@ fn print_account_summary_details(account: &AccountSummary) {
     }
 }
 
-// TODO Decrypt password before showing
-fn print_account_details(account: &Account) {
+fn print_account_details(account: &Account, master_password: &String) {
     println!("Account Details:");
     println!("ID: {}", account.id);
     println!("Name: {}", account.name);
     println!("Username: {}", account.username);
-    println!("Password: {}", account.password);
+
+    // Decrypt password before showing
+    let decrypted_password = decrypt_password(master_password, &account.password);
+    println!("Password: {}", decrypted_password);
     match &account.url {
         Some(url) => println!("URL: {}", url),
         None => println!("URL: N/A"),
@@ -170,7 +160,8 @@ fn handle_get_account(conn: &Connection) {
     if let Ok(id) = user_input.parse::<i64>() {
         match get_account_by_id(conn, id) {
             Ok(account) => {
-                print_account_details(&account);
+                let master = obtain_master_credentials(conn);
+                print_account_details(&account, &master.password);
             },
             Err(err) => {
                 println!("Error fetching account by ID: {}", err);
@@ -179,7 +170,8 @@ fn handle_get_account(conn: &Connection) {
     } else {
         match get_account_by_name(conn, &user_input) {
             Ok(account) => {
-                print_account_details(&account);
+                let master = obtain_master_credentials(conn);
+                print_account_details(&account, &master.password);
             },
             Err(err) => {
                 println!("Error fetching account by name: {}", err);
@@ -244,7 +236,7 @@ fn handle_update_account(conn: &Connection) {
     }
 }
 
-// Helper function for handle_update_account()
+/// Helper function for handle_update_account()
 fn update_account_details(conn: &Connection, account: &mut Account) {
     println!("\nCurrent account details:");
     println!("Name: {}", account.name);
@@ -270,7 +262,7 @@ fn update_account_details(conn: &Connection, account: &mut Account) {
     let username = if username.is_empty() { account.username.clone() } else { username };
 
     println!("Enter the new password (leave empty to keep current):");
-    let password = get_user_input();
+    let password = get_password();
     let password = if password.is_empty() { account.password.clone() } else { password };
 
     println!("Enter the new URL (leave empty to keep current):");
@@ -281,14 +273,17 @@ fn update_account_details(conn: &Connection, account: &mut Account) {
     let description = get_user_input();
     let description = if description.is_empty() { account.description.clone() } else { Some(description) };
 
-    // TODO Encrypt password before adding
+    // Encrypt password before adding
+    let master = obtain_master_credentials(conn);
+    let encrypted_password = encrypt_password(&master.password, &password);
+
     let updated_account = Account {
         id: account.id, // Keep the same ID
-        name,
-        username,
-        password,
-        url,
-        description,
+        name: name,
+        username: username,
+        password: encrypted_password,
+        url: url,
+        description: description,
     };
 
     match update_account(conn, &updated_account) {
@@ -301,7 +296,22 @@ fn update_account_details(conn: &Connection, account: &mut Account) {
     }
 }
 
-fn handle_verify_master(conn: &Connection) {
+/// Return type for [`obtain_master_credentials()`]
+struct MasterCredentials {
+    username: String,
+    password: String,
+}
+
+impl Drop for MasterCredentials {
+    fn drop(&mut self) {
+        self.username.zeroize();
+        self.password.zeroize();
+    }
+}
+/// Takes user input
+/// 
+/// Returns [`MasterCredentials`] with username and password
+fn obtain_master_credentials(conn: &Connection) -> MasterCredentials {
     let mut attempts = 3;
 
     loop {
@@ -318,7 +328,7 @@ fn handle_verify_master(conn: &Connection) {
         match verify_master(conn, &username, &password) {
             Ok(true) => {
                 println!("Logging in...");
-                break;
+                return MasterCredentials { username, password };
             },
             Ok(false) | Err(_) => {
                 attempts -= 1;

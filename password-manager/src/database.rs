@@ -1,7 +1,5 @@
-use core::hash;
-
 use rusqlite::{Connection, Result, Row};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::Zeroize;
 
 use crate::{compile_config::DB_PATH, encryption::{hash_master_password, verify_master_password}};
 
