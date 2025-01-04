@@ -96,7 +96,7 @@ pub fn encrypt_password(master_password: &String, password: &String) -> String {
     let mut encrypted_data = nonce.to_vec();
     encrypted_data.extend_from_slice(&ciphertext);
 
-    // Prepend the salt for storage
+    // Append the salt for storage
     encrypted_data.extend_from_slice(salt.as_bytes());
 
     // Convert to base64 string
@@ -122,7 +122,7 @@ pub fn decrypt_password(master_password: &String, encrypted_data_string: &String
     // Split salt and ciphertext
     // Salt is last 22 bytes
     let (remaining_string, salt) = encrypted_data.split_at(encrypted_data.len() - 22);  
-    let salt = std::str::from_utf8(salt).unwrap(); // TODO Fix
+    let salt = std::str::from_utf8(salt).unwrap();
 
     // Split nonce and ciphertext
     // The nonce is the first 12 bytes
