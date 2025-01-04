@@ -5,21 +5,20 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-# TODO change to current version
 [dependencies]
 rusqlite = "0.32.1"
-bcrypt = "*"
-aes = "*"
-block-modes = "*"
-rand = "*"
-serde = { version = "*", features = ["derive"] }
-serde_json = "*"
-rpassword = "*"
-zeroize = "*"
-argon2 = "*"
-block-padding = "*"
-anyhow = "*"
-rand_core = "*"
+bcrypt = "0.16.0"
+aes = "0.8.4"
+block-modes = "0.9.1"
+rand = "0.8.5"
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.134"
+rpassword = "7.3.1"
+zeroize = "1.8.1"
+argon2 = "0.5.3"
+block-padding = "0.3.3"
+anyhow = "1.0.95"
+rand_core = "0.6.4"
 subtle = "2.6"
 aes-gcm = "0.10.3"
 base64 = "0.22.1"
