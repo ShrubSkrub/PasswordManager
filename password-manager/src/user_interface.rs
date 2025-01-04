@@ -2,7 +2,7 @@ use std::{io::{self, Write}, process};
 use rusqlite::Connection;
 use zeroize::Zeroize;
 
-use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_id, list_accounts, update_account, verify_master, Account, AccountSummary, Master}, encryption::{self, decrypt_password, encrypt_password, hash_master_password}};
+use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_id, get_master_by_username, list_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{self, decrypt_password, encrypt_password, hash_master_password}};
 
 fn print_separator() {
     println!("------------------------------");
@@ -343,5 +343,46 @@ fn obtain_master_credentials(conn: &Connection) -> MasterCredentials {
 }
 
 fn handle_change_master_password(conn: &Connection) {
-    unimplemented!()
+    println!("Login with master account to update:");
+
+    let master_creds = obtain_master_credentials(conn);
+
+    match get_master_by_username(conn, &master_creds.username) {
+        Ok(master) => {
+            let username = if SINGLE_MASTER_FLAG {
+                master.username.clone()
+            } else {
+                println!("Enter the new username (leave empty to keep current):");
+                let input_username = get_user_input();
+                if input_username.is_empty() { master.username.clone() } else { input_username }
+            };
+
+            println!("Enter the new password (leave empty to keep current):");
+            let password = get_password();
+            let password = if password.is_empty() {
+                master.password.clone() 
+            } else {
+                // Hash password before adding
+                hash_master_password(&password).expect("Error hashing password")
+            };
+
+            let updated_master = Master {
+                id: master.id,
+                username: username,
+                password: password
+            };
+
+            match update_master(conn, &updated_master) {
+                Ok(_) => {
+                    println!("Account with ID {} was updated successfully.", updated_master.id);
+                }
+                Err(e) => {
+                    println!("Failed to update account with ID {}: {:?}", updated_master.id, e);
+                }
+            }
+        }
+        Err(_) => {
+            println!("No master found with that username: {}", master_creds.username);
+        }
+    }
 }
