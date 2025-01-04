@@ -1,15 +1,13 @@
-use anyhow::{Error, Result};
+use anyhow::Result;
 use argon2::{
-    password_hash::{Encoding, PasswordHasher, SaltString}, Argon2, PasswordHash, PasswordVerifier
+    password_hash::{PasswordHasher, SaltString}, Argon2, PasswordHash, PasswordVerifier
 };
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
-use block_padding::generic_array::GenericArray;
-use rand::RngCore;
 use rand_core::OsRng;
 
 use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit},
-    Aes256Gcm, Key, Nonce
+    Aes256Gcm, Key
 };
 
 // Use Argon2id with a minimum configuration of 19 MiB of memory, an iteration count of 2, and 1 degree of parallelism.
@@ -28,6 +26,7 @@ pub fn hash_master_password(password: &String) -> Result<String> {
 }
 
 
+/// Verifies if input password matches the hashed master password
 pub fn verify_master_password(stored_b64_hash: &String, password: &String) -> bool {
     let argon2 = Argon2::default();
 
@@ -41,17 +40,31 @@ pub fn verify_master_password(stored_b64_hash: &String, password: &String) -> bo
 
 const AES_KEY_SIZE: usize = 32;  // 256-bit key size for AES-256
 
+/// Generates an AES key using password and random salt
+/// 
 /// This function assumes correct master password input
 /// 
 /// Validate password before passing, will panic on fail
-fn derive_aes_key_from_master_password_hash(master_password_hash: &String) -> [u8; AES_KEY_SIZE] {
-    let parsed_hash = PasswordHash::new(&master_password_hash).expect("Failed to parse master password hash");
-    let salt = parsed_hash.salt.unwrap();
-    let salt = salt.as_str().as_bytes();
+/// 
+/// # Returns
+/// 
+/// Returns AES key and salt
+fn create_aes_key_from_master_password(master_password: &String) -> ([u8; AES_KEY_SIZE], String) {
+    let salt = SaltString::generate(&mut OsRng);
+    let salt = salt.as_str();
 
     let mut output_key = [0u8; AES_KEY_SIZE];
     Argon2::default()
-        .hash_password_into(master_password_hash.as_bytes(), salt, &mut output_key)
+        .hash_password_into(master_password.as_bytes(), salt.as_bytes(), &mut output_key)
+        .expect("Error hashing password!");
+
+    (output_key, salt.to_string())
+}
+
+fn derive_aes_key_from_master_password_and_salt(master_password: &String, salt: &str) -> [u8; AES_KEY_SIZE] {
+    let mut output_key = [0u8; AES_KEY_SIZE];
+    Argon2::default()
+        .hash_password_into(master_password.as_bytes(), salt.as_bytes(), &mut output_key)
         .expect("Error hashing password!");
 
     output_key
@@ -62,14 +75,16 @@ fn derive_aes_key_from_master_password_hash(master_password_hash: &String) -> [u
 /// 
 /// # Arguments
 /// 
-/// * master_password_hash: Hash of master password for account password belongs to
-/// * password: Plaintext password
+/// * master_password: Plaintext master password for account password belongs to
+/// * password: Plaintext password to be encrypted
 /// 
 /// # Returns
 /// 
-/// Returns a base-64 encoded string of the encrypted password
-pub fn encrypt_password(master_password_hash: &String, password: &String) -> String {
-    let key = derive_aes_key_from_master_password_hash(master_password_hash);
+/// Returns a base-64 encoded string of the encrypted password, with nonce and salt prepended
+/// 
+/// ie. "nonce + salt + encrypted_password"
+pub fn encrypt_password(master_password: &String, password: &String) -> String {
+    let (key, salt) = create_aes_key_from_master_password(master_password);
     let key = Key::<Aes256Gcm>::from_slice(&key);
 
     let cipher = Aes256Gcm::new(&key);
@@ -81,6 +96,9 @@ pub fn encrypt_password(master_password_hash: &String, password: &String) -> Str
     let mut encrypted_data = nonce.to_vec();
     encrypted_data.extend_from_slice(&ciphertext);
 
+    // Prepend the salt for storage
+    encrypted_data.extend_from_slice(salt.as_bytes());
+
     // Convert to base64 string
     let encrypted_data_string = URL_SAFE.encode(encrypted_data);
 
@@ -91,21 +109,26 @@ pub fn encrypt_password(master_password_hash: &String, password: &String) -> Str
 /// 
 /// # Arguments
 /// 
-/// * master_password_hash: Hash of master password for account password belongs to
+/// * master_password: Plaintext master password for account password belongs to
 /// * encrypted_data_string: Base64 encoded string of encrypted password
 /// 
 /// # Returns
 /// 
 /// Returns the plaintext password
-pub fn decrypt_password(master_password_hash: &String, encrypted_data_string: &String) -> String {
+pub fn decrypt_password(master_password: &String, encrypted_data_string: &String) -> String {
     // Decode from base64 first
-    let encrypted_data = URL_SAFE.decode(encrypted_data_string).expect("Failed to decode encrypted_data_string");
+    let encrypted_data = URL_SAFE.decode(encrypted_data_string).expect("Failed to decode password string");
+
+    // Split salt and ciphertext
+    // Salt is last 22 bytes
+    let (remaining_string, salt) = encrypted_data.split_at(encrypted_data.len() - 22);  
+    let salt = std::str::from_utf8(salt).unwrap(); // TODO Fix
 
     // Split nonce and ciphertext
     // The nonce is the first 12 bytes
-    let (nonce, ciphertext) = encrypted_data.split_at(12);  
+    let (nonce, ciphertext) = remaining_string.split_at(12);  
 
-    let key = derive_aes_key_from_master_password_hash(master_password_hash);
+    let key = derive_aes_key_from_master_password_and_salt(master_password, salt);
     let key = Key::<Aes256Gcm>::from_slice(&key);
 
     let cipher = Aes256Gcm::new(&key);

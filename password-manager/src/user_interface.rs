@@ -21,11 +21,10 @@ fn display_main_menu() {
 pub fn start_ui_loop(conn: Connection) {
     // For testing
     let master_password = "changethis".to_string();
-    let master_password_hash = hash_master_password(&master_password).unwrap();
     let password = "example".to_string();
-    let encrypted_password = encrypt_password(&master_password_hash, &password);
+    let encrypted_password = encrypt_password(&master_password, &password);
     println!("Encrypted password: {:?}", encrypted_password);
-    let decrypted_password = decrypt_password(&master_password_hash, &encrypted_password);
+    let decrypted_password = decrypt_password(&master_password, &encrypted_password);
     println!("Decrypted password: {}", decrypted_password);
 
     handle_verify_master(&conn);
