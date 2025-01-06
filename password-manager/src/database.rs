@@ -1,9 +1,17 @@
-use rusqlite::{Connection, Result, Row};
+use std::str::FromStr;
+
+use sqlx::prelude::FromRow;
+// use rusqlite::{Connection, Result, Row};
+// use sqlx::{query, sqlite::SqliteConnection, Result, Row};
+use sqlx::ConnectOptions;
+use sqlx::{sqlite::{SqliteConnectOptions, SqlitePool}, Sqlite};
 use zeroize::Zeroize;
+use anyhow;
+use tokio;
 
 use crate::{compile_config::DB_PATH, encryption::{hash_master_password, verify_master_password}};
 
-#[derive(Debug)]
+#[derive(Debug, FromRow)]
 pub struct Account {
     pub id: i64,  // SQLite uses `i64` for integer keys
     pub name: String,
@@ -24,18 +32,6 @@ impl Account {
             description,
         }
     }
-
-    // Helper function to map a row to an Account struct
-    fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        Ok(Account {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            username: row.get(2)?,
-            password: row.get(3)?,
-            url: row.get(4)?,
-            description: row.get(5)?,
-        })
-    }
 }
 
 impl Drop for Account {
@@ -49,27 +45,16 @@ impl Drop for Account {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, FromRow)]
 pub struct AccountSummary {
     pub id: i64,
     pub name: String,
     pub description: Option<String>,
 }
 
-impl AccountSummary {
-    // Helper function to map a row to an AccountSummary struct
-    fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        Ok(AccountSummary {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            description: row.get(2)?
-        })
-    }
-}
-
 // For now, this will be used to define a set of users who are able to access the passwords
 // TODO Add a way to match masters to their own accounts
-#[derive(Debug)]
+#[derive(Debug, FromRow)]
 pub struct Master {
     pub id: i64,
     pub username: String,
@@ -84,15 +69,6 @@ impl Master {
             password
         }
     }
-
-    // Helper function to map a row to an Account struct
-    fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        Ok(Master {
-            id: row.get(0)?,
-            username: row.get(1)?,
-            password: row.get(2)?,
-        })
-    }
 }
 
 impl Drop for Master {
@@ -103,155 +79,190 @@ impl Drop for Master {
     }
 }
 
-pub fn initialize_db() -> Result<Connection> {
-    let conn = Connection::open(DB_PATH)?;
+pub async fn initialize_db() -> anyhow::Result<SqlitePool> {
+    let options = SqliteConnectOptions::from_str(DB_PATH)?
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+    let pool = SqlitePool::connect_with(options).await?;
 
-    conn.execute(
-        "create table if not exists accounts (
-            account integer primary key,
-            name text not null unique,
-            url text,
-            username text not null,
-            password text not null,
-            description text
-        )",
-        [],
-    )?;
-    conn.execute(
+    sqlx::query!(
+        "CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            url TEXT,
+            username TEXT NOT NULL,
+            password TEXT NOT NULL,
+            description TEXT
+        )"
+    )
+    .execute(&pool)
+    .await?; 
+
+    sqlx::query!(
         "create table if not exists masters (
-            master integer primary key,
+            id integer primary key,
             username text not null,
             password text not null
-        )",
-        [],
-    )?;
+        )"
+    )
+    .execute(&pool)
+    .await?; 
 
     // Insert the default account only if there are no accounts in the table
     let default_master_password_hash = hash_master_password(&"changethis".to_string()).expect("Error hashing password!");
-    conn.execute(
+    sqlx::query!(
         "insert into masters (username, password)
-        select 'default', ?1
+        select 'default', ?
         where not exists (select 1 from masters)",
-        rusqlite::params![default_master_password_hash]
-    )?;
+        default_master_password_hash
+    )
+    .execute(&pool)
+    .await?; 
 
-    Ok(conn)
+    Ok(pool)
 }
 
 // ----------------------------------------------------------------------------
 // Accounts -------------------------------------------------------------------
 
-pub fn add_account(conn: &Connection, account: &Account) -> Result<()> {
-    let sql = "INSERT INTO accounts (name, username, password, url, description) 
-                     VALUES (?1, ?2, ?3, ?4, ?5)";
-
+pub async fn add_account(pool: &SqlitePool, account: &Account) -> anyhow::Result<()> {
     // Account id assigned automatically
-    let params = rusqlite::params![
+    sqlx::query!(
+        "INSERT INTO accounts (name, username, password, url, description) 
+        VALUES (?1, ?2, ?3, ?4, ?5)",
         account.name,
         account.username,
         account.password,
         account.url,
         account.description
-    ];
-    conn.execute(sql, params)?;
+    )
+    .execute(pool)
+    .await?; 
+
     Ok(())
 }
 
-pub fn get_account_by_id(conn: &Connection, id: i64) -> Result<Account> {
-    let sql = "SELECT account, name, username, password, url, description
-                     FROM accounts WHERE account = ?1";
-    conn.query_row(sql, rusqlite::params![id], |row| {
-        Account::from_row(row)
-    })
+pub async fn get_account_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Account> {
+    let account = sqlx::query_as!(Account,
+        "SELECT id, name, username, password, url, description
+        FROM accounts WHERE id = ?",
+        id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(account)
 }
 
-pub fn get_account_by_name(conn: &Connection, name: &String) -> Result<Account> {
-    let sql = "SELECT account, name, username, password, url, description
-                     FROM accounts WHERE name = ?1";
-    conn.query_row(sql, rusqlite::params![name], |row| {
-        Account::from_row(row)
-    })
+pub async fn get_account_by_name(pool: &SqlitePool, name: &String) -> anyhow::Result<Account> {
+    let row = sqlx::query!(
+        "SELECT id, name, username, password, url, description
+        FROM accounts WHERE name = ?",
+        name
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let account = Account {
+        id: row.id.expect("account.id was null"), // sqlx interprets id as Option
+        name: row.name,
+        username: row.username,
+        password: row.password,
+        url: row.url,
+        description: row.description,
+    };
+
+    Ok(account)
 }
 
-pub fn delete_account_by_id(conn: &Connection, id: i64) -> Result<()> {
-    match get_account_by_id(conn, id) {
-        Ok(account) => {
-            let delete_sql = "DELETE FROM accounts WHERE account = ?1";
-            conn.execute(delete_sql, rusqlite::params![id])?;
+// TODO Make return account, and handle printing in user_interface.rs instead
+pub async fn delete_account_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<()> {
+    match get_account_by_id(pool, id).await {
+        Ok(returned_account) => {
+            let query_result = sqlx::query!(
+                "DELETE FROM accounts WHERE id = ?",
+                id
+            )
+            .execute(pool)
+            .await?;
+
+            // Sanity check
+            if query_result.rows_affected() == 0 {
+                return Err(anyhow::anyhow!("DELETE failed: No account found with ID: {}", id))
+            }
             
-            println!("Account deleted: {:?}", account);
+            println!("Account deleted: {:?}", returned_account);
             Ok(())
         },
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            println!("No account found with ID: {}", id);
-            Err(rusqlite::Error::QueryReturnedNoRows)
-        },
         Err(err) => {
+            println!("No account found with ID: {}", id);
             Err(err)
         }
     }
 }
 
-pub fn delete_account_by_name(conn: &Connection, name: &String) -> Result<()> {
-    match get_account_by_name(conn, name) {
-        Ok(account) => {
-            let delete_sql = "DELETE FROM accounts WHERE name = ?1";
-            conn.execute(delete_sql, rusqlite::params![name])?;
+// TODO Make return account, and handle printing in user_interface.rs instead
+pub async fn delete_account_by_name(pool: &SqlitePool, name: &String) -> anyhow::Result<()> {
+    match get_account_by_name(pool, name).await {
+        Ok(returned_account) => {
+            let query_result = sqlx::query!(
+                "DELETE FROM accounts WHERE name = ?",
+                name
+            )
+            .execute(pool)
+            .await?;
+
+            // Sanity check
+            if query_result.rows_affected() == 0 {
+                return Err(anyhow::anyhow!("DELETE failed: No account found with name: {}", name))
+            }
             
-            println!("Account deleted: {:?}", account);
+            println!("Account deleted: {:?}", returned_account);
             Ok(())
         },
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            println!("No account found with name: {}", name);
-            Err(rusqlite::Error::QueryReturnedNoRows)
-        },
         Err(err) => {
+            println!("No account found with name: {}", name);
             Err(err)
         }
     }
 }
 
 // TODO Add a function for pagination
-pub fn list_accounts(conn: &Connection) -> Result<Vec<AccountSummary>> {
+pub async fn list_accounts(pool: &SqlitePool) -> anyhow::Result<Vec<AccountSummary>> {
     // List all account ids, names, and descriptions from the database
-    let sql = "SELECT account, name, description FROM accounts";
-    let mut stmt = conn.prepare(sql)?;
-
-    let account_iter = stmt.query_map([], |row| AccountSummary::from_row(row))?;
-
-    let mut summaries = Vec::new();
-    for account in account_iter {
-        summaries.push(account?);
-    }
+    let summaries = sqlx::query_as!(AccountSummary,
+        "SELECT id, name, description FROM accounts"
+    )
+    .fetch_all(pool)
+    .await?;
 
     Ok(summaries)
 }
 
-pub fn search_accounts_by_id(conn: &Connection, id: i64) -> Result<Vec<AccountSummary>>{
+pub async fn search_accounts_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Vec<AccountSummary>>{
     unimplemented!()
 }
 
-pub fn search_accounts_by_name(conn: &Connection, name: &String) -> Result<Vec<AccountSummary>>{
+pub async fn search_accounts_by_name(pool: &SqlitePool, name: &String) -> anyhow::Result<Vec<AccountSummary>>{
     unimplemented!()
 }
 
-pub fn update_account(conn: &Connection, account: &Account) -> Result<()> {
-    let sql = "UPDATE accounts 
-               SET name = ?1, username = ?2, password = ?3, url = ?4, description = ?5 
-               WHERE account = ?6";
-
-    let params = rusqlite::params![
+pub async fn update_account(pool: &SqlitePool, account: &Account) -> anyhow::Result<()> {
+    let query_result = sqlx::query!(
+        "UPDATE accounts 
+        SET name = ?, username = ?, password = ?, url = ?, description = ? 
+        WHERE id = ?",
         account.name,
         account.username,
         account.password,
         account.url,
         account.description,
         account.id
-    ];
+    )
+    .execute(pool)
+    .await?; 
 
-    let rows_affected = conn.execute(sql, params)?;
-    if rows_affected == 0 {
-        return Err(rusqlite::Error::QueryReturnedNoRows);
+    if query_result.rows_affected() == 0 {
+        return Err(anyhow::anyhow!("UPDATE failed: Query returned no rows"))
     }
 
     Ok(())
@@ -260,109 +271,126 @@ pub fn update_account(conn: &Connection, account: &Account) -> Result<()> {
 
 // ----------------------------------------------------------------------------
 // Masters --------------------------------------------------------------------
-pub fn add_master(conn: &Connection, master: &Master) -> Result<()> {
-    let sql = "INSERT INTO masters (username, password) 
-                     VALUES (?1, ?2)";
-
-    // Account id assigned automatically
-    let params = rusqlite::params![
+pub async fn add_master(pool: &SqlitePool, master: &Master) -> anyhow::Result<()> {
+    // Master id assigned automatically
+    sqlx::query!(
+        "INSERT INTO masters (username, password) 
+        VALUES (?, ?)",
         master.username,
         master.password
-    ];
-    conn.execute(sql, params)?;
+    )
+    .execute(pool)
+    .await?; 
+
     Ok(())
 }
-pub fn get_master_by_id(conn: &Connection, id: i64) -> Result<Master> {
-    let sql = "SELECT master, username, password
-                     FROM masters WHERE master = ?1";
-    conn.query_row(sql, rusqlite::params![id], |row| {
-        Master::from_row(row)
-    })
+pub async fn get_master_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Master> {
+    let master = sqlx::query_as!(Master,
+        "SELECT id, username, password
+        FROM masters WHERE id = ?",
+        id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(master)
 }
 
-pub fn get_master_by_username(conn: &Connection, username: &String) -> Result<Master> {
-    let sql = "SELECT master, username, password
-                     FROM masters WHERE username = ?1";
-    conn.query_row(sql, rusqlite::params![username], |row| {
-        Master::from_row(row)
-    })
+pub async fn get_master_by_username(pool: &SqlitePool, username: &String) -> anyhow::Result<Master> {
+    let master = sqlx::query_as!(Master,
+        "SELECT id, username, password
+        FROM masters WHERE username = ?",
+        username
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(master)
 }
 
-pub fn delete_master_by_id(conn: &Connection, id: i64) -> Result<()> {
-    match get_master_by_id(conn, id) {
-        Ok(master) => {
-            let delete_sql = "DELETE FROM masters WHERE master = ?1";
-            conn.execute(delete_sql, rusqlite::params![id])?;
-            
-            println!("Master account deleted: {:?}", master);
+pub async fn delete_master_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<()> {
+    match get_master_by_id(pool, id).await {
+        Ok(returned_master) => {
+            let query_result = sqlx::query!(
+                "DELETE FROM masters WHERE id = ?",
+                id
+            )
+            .execute(pool)
+            .await?;
+
+            // Sanity check
+            if query_result.rows_affected() == 0 {
+                return Err(anyhow::anyhow!("DELETE failed: No master account found with ID: {}", id))
+            }
+
+            println!("Master account deleted: {:?}", returned_master);
             Ok(())
         },
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
+        Err(err) => {
             println!("No master account found with ID: {}", id);
-            Err(rusqlite::Error::QueryReturnedNoRows)
-        },
-        Err(err) => {
             Err(err)
         }
     }
 }
 
-pub fn delete_master_by_username(conn: &Connection, username: &String) -> Result<()> {
-    match get_master_by_username(conn, username) {
-        Ok(master) => {
-            let delete_sql = "DELETE FROM masters WHERE username = ?1";
-            conn.execute(delete_sql, rusqlite::params![username])?;
-            
-            println!("Master account deleted: {:?}", master);
+pub async fn delete_master_by_username(pool: &SqlitePool, username: &String) -> anyhow::Result<()> {
+    match get_master_by_username(pool, username).await {
+        Ok(returned_master) => {
+            let query_result = sqlx::query!(
+                "DELETE FROM masters WHERE username = ?",
+                username
+            )
+            .execute(pool)
+            .await?;
+
+            // Sanity check
+            if query_result.rows_affected() == 0 {
+                return Err(anyhow::anyhow!("DELETE failed: No master account found with username: {}", username))
+            }
+
+            println!("Master account deleted: {:?}", returned_master);
             Ok(())
         },
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            println!("No master account found with name: {}", username);
-            Err(rusqlite::Error::QueryReturnedNoRows)
-        },
         Err(err) => {
+            println!("No master account found with username: {}", username);
             Err(err)
         }
     }
 }
 
-// TODO Test if this works without returing the password
-pub fn list_master_accounts(conn: &Connection) -> Result<Vec<Master>> {
-    let sql = "SELECT master, username FROM masters";
-    let mut stmt = conn.prepare(sql)?;
-
-    let master_iter = stmt.query_map([], |row| Master::from_row(row))?;
-
-    let mut summaries = Vec::new();
-    for master in master_iter {
-        summaries.push(master?);
-    }
+// TODO Don't return password? Maybe make another struct
+pub async fn list_master_accounts(pool: &SqlitePool) -> anyhow::Result<Vec<Master>> {
+    let summaries = sqlx::query_as!(Master,
+        "SELECT id, username, password FROM masters"
+    )
+    .fetch_all(pool)
+    .await?;
 
     Ok(summaries)
 }
 
 
-pub fn update_master(conn: &Connection, master: &Master) -> Result<()> {
-    let sql = "UPDATE masters 
-               SET username = ?1, password = ?2
-               WHERE master = ?3";
-
-    let params = rusqlite::params![
+pub async fn update_master(pool: &SqlitePool, master: &Master) -> anyhow::Result<()> {
+    let query_result = sqlx::query!(
+        "UPDATE masters 
+        SET username = ?, password = ?
+        WHERE id = ?",
         master.username,
         master.password,
         master.id
-    ];
+    )
+    .execute(pool)
+    .await?; 
 
-    let rows_affected = conn.execute(sql, params)?;
-    if rows_affected == 0 {
-        return Err(rusqlite::Error::QueryReturnedNoRows);
+    if query_result.rows_affected() == 0 {
+        return Err(anyhow::anyhow!("UPDATE failed: Query returned no rows"))
     }
 
     Ok(())
 }
 
-pub fn verify_master(conn: &Connection, username: &String, password: &String) -> Result<bool> {
-    let stored_master = get_master_by_username(conn, username)?;
+pub async fn verify_master(pool: &SqlitePool, username: &String, password: &String) -> anyhow::Result<bool> {
+    let stored_master = get_master_by_username(pool, username).await?;
 
     if verify_master_password(&stored_master.password, &password){
         Ok(true)

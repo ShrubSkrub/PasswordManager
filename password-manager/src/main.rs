@@ -7,10 +7,11 @@ use database::initialize_db;
 use user_interface::start_ui_loop;
 use std::process;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Initialize the database connection
-    let conn = match initialize_db() {
-        Ok(connection) => connection,
+    let pool = match initialize_db().await {
+        Ok(valid_pool) => valid_pool,
         Err(e) => {
             eprintln!("Failed to connect to database: {}", e);
             process::exit(1);
@@ -18,5 +19,5 @@ fn main() {
     };
 
     // Start the user interface loop
-    start_ui_loop(conn);
+    start_ui_loop(&pool);
 }

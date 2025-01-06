@@ -22,3 +22,5 @@ rand_core = "0.6.4"
 subtle = "2.6"
 aes-gcm = "0.10.3"
 base64 = "0.22.1"
+sqlx = { version = "0.8.3", features = ["sqlite", "chrono"] }
+tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }

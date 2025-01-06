@@ -1,5 +1,6 @@
 use std::{io::{self, Write}, process};
 use rusqlite::Connection;
+use sqlx::{sqlite::{SqliteConnectOptions, SqlitePool}, Sqlite};
 use zeroize::Zeroize;
 
 use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{decrypt_password, encrypt_password, hash_master_password}};
@@ -19,8 +20,8 @@ fn display_main_menu() {
     println!("x. Exit");
 }
 
-pub fn start_ui_loop(conn: Connection) {
-    obtain_master_credentials(&conn);
+pub fn start_ui_loop(pool: &SqlitePool) {
+    obtain_master_credentials(pool);
     loop {
         display_main_menu();
 
