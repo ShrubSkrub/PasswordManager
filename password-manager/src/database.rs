@@ -1,13 +1,9 @@
 use std::str::FromStr;
 
 use sqlx::prelude::FromRow;
-// use rusqlite::{Connection, Result, Row};
-// use sqlx::{query, sqlite::SqliteConnection, Result, Row};
-use sqlx::ConnectOptions;
-use sqlx::{sqlite::{SqliteConnectOptions, SqlitePool}, Sqlite};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use zeroize::Zeroize;
 use anyhow;
-use tokio;
 
 use crate::{compile_config::DB_PATH, encryption::{hash_master_password, verify_master_password}};
 

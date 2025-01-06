@@ -1,2 +1,4 @@
 PasswordManager.code-workspace
 .vscode/launch.json
+password-manager/passwords.db-shm
+password-manager/passwords.db-wal

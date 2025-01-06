@@ -1,5 +1,4 @@
 use std::{io::{self, Write}, process};
-use rusqlite::Connection;
 use sqlx::{sqlite::{SqliteConnectOptions, SqlitePool}, Sqlite};
 use zeroize::Zeroize;
 
@@ -9,7 +8,7 @@ fn print_separator() {
     println!("------------------------------");
 }
 fn display_main_menu() {
-    print_separator();
+    println!("==============================");
     println!("Password Manager:");
     println!("1. Add an account");
     println!("2. List accounts");
@@ -20,32 +19,33 @@ fn display_main_menu() {
     println!("x. Exit");
 }
 
-pub fn start_ui_loop(pool: &SqlitePool) {
-    obtain_master_credentials(pool);
+pub async fn start_ui_loop(pool: &SqlitePool) {
+    let _result = obtain_master_credentials(pool).await;
     loop {
         display_main_menu();
 
         print!("Please choose an option: ");
         let user_choice = get_user_input();
+        println!("==============================");
 
         match user_choice.as_str() {
             "1" => {
-                handle_add_account(&conn);
+                handle_add_account(pool).await;
             }
             "2" => {
-                handle_list_accounts(&conn);
+                handle_list_accounts(pool).await;
             }
             "3" => {
-                handle_get_account(&conn);
+                handle_get_account(pool).await;
             }
             "4" => {
-                handle_update_account(&conn);
+                handle_update_account(pool).await;
             }
             "5" => {
-                handle_delete_account(&conn);
+                handle_delete_account(pool).await;
             }
             "6" => {
-                handle_change_master_password(&conn);
+                handle_change_master_password(pool).await;
             }
             "x" => {
                 println!("Exiting...");
@@ -73,8 +73,7 @@ fn get_password() -> String {
     }
 }
 
-fn handle_add_account(conn: &Connection) {
-
+async fn handle_add_account(pool: &SqlitePool) {
     println!("Enter account name (ie. Google, X, Discord): ");
     let name = get_user_input();
 
@@ -95,12 +94,12 @@ fn handle_add_account(conn: &Connection) {
     let description = if description_input.is_empty() { None } else { Some(description_input) };
 
     // Encrypt password before adding
-    let master = obtain_master_credentials(conn);
+    let master = obtain_master_credentials(pool).await;
     let encrypted_password = encrypt_password(&master.password, &password);
 
     let account = Account::new(name, username, encrypted_password, url, description);
 
-    match add_account(conn, &account) {
+    match add_account(pool, &account).await {
         Ok(_result) => { ()
         },
         Err(err) => {
@@ -137,10 +136,10 @@ fn print_account_details(account: &Account, master_password: &String) {
     }
 }
 
-fn handle_list_accounts(conn: &Connection) {
+async fn handle_list_accounts(pool: &SqlitePool) {
     println!("Listing accounts: ");
 
-    match list_accounts(conn) {
+    match list_accounts(pool).await {
         Ok(results) => {
             for account in results {
                 print_account_summary_details(&account);
@@ -153,15 +152,15 @@ fn handle_list_accounts(conn: &Connection) {
     }
 }
 
-fn handle_get_account(conn: &Connection) {
+async fn handle_get_account(pool: &SqlitePool) {
     println!("Enter account ID or name:");
     let user_input = get_user_input();
 
     // Automatically determine if id or name
     if let Ok(id) = user_input.parse::<i64>() {
-        match get_account_by_id(conn, id) {
+        match get_account_by_id(pool, id).await {
             Ok(account) => {
-                let master = obtain_master_credentials(conn);
+                let master = obtain_master_credentials(pool).await;
                 print_account_details(&account, &master.password);
             },
             Err(err) => {
@@ -169,9 +168,9 @@ fn handle_get_account(conn: &Connection) {
             }
         }
     } else {
-        match get_account_by_name(conn, &user_input) {
+        match get_account_by_name(pool, &user_input).await {
             Ok(account) => {
-                let master = obtain_master_credentials(conn);
+                let master = obtain_master_credentials(pool).await;
                 print_account_details(&account, &master.password);
             },
             Err(err) => {
@@ -181,13 +180,13 @@ fn handle_get_account(conn: &Connection) {
     }
 }
 
-fn handle_delete_account(conn: &Connection) {
+async fn handle_delete_account(pool: &SqlitePool) {
     println!("Enter account ID or name:");
     let user_input = get_user_input();
 
     // Automatically determine if id or name
     if let Ok(id) = user_input.parse::<i64>() {
-        match delete_account_by_id(conn, id) {
+        match delete_account_by_id(pool, id).await {
             Ok(account) => {
                 account
             },
@@ -196,7 +195,7 @@ fn handle_delete_account(conn: &Connection) {
             }
         }
     } else {
-        match delete_account_by_name(conn, &user_input) {
+        match delete_account_by_name(pool, &user_input).await {
             Ok(account) => {
                 account
             },
@@ -207,16 +206,16 @@ fn handle_delete_account(conn: &Connection) {
     }
 }
 
-fn handle_update_account(conn: &Connection) {
+async fn handle_update_account(pool: &SqlitePool) {
     println!("Enter the account ID or name to update:");
 
     let input = get_user_input();
     
     match input.parse::<i64>() {
         Ok(id) => {
-            match get_account_by_id(conn, id) {
+            match get_account_by_id(pool, id).await {
                 Ok(mut account) => {
-                    update_account_details(conn, &mut account);
+                    update_account_details(pool, &mut account);
                 }
                 Err(_) => {
                     println!("No account found with ID: {}", id);
@@ -225,9 +224,9 @@ fn handle_update_account(conn: &Connection) {
         }
         Err(_) => {
             let name = input.trim().to_string();
-            match get_account_by_name(conn, &name) {
+            match get_account_by_name(pool, &name).await {
                 Ok(mut account) => {
-                    update_account_details(conn, &mut account);
+                    update_account_details(pool, &mut account);
                 }
                 Err(_) => {
                     println!("No account found with name: {}", name);
@@ -238,7 +237,7 @@ fn handle_update_account(conn: &Connection) {
 }
 
 /// Helper function for handle_update_account()
-fn update_account_details(conn: &Connection, account: &mut Account) {
+async fn update_account_details(pool: &SqlitePool, account: &mut Account) {
     println!("\nCurrent account details:");
     println!("Name: {}", account.name);
     println!("Username: {}", account.username);
@@ -275,7 +274,7 @@ fn update_account_details(conn: &Connection, account: &mut Account) {
     let description = if description.is_empty() { account.description.clone() } else { Some(description) };
 
     // Encrypt password before adding
-    let master = obtain_master_credentials(conn);
+    let master = obtain_master_credentials(pool).await;
     let encrypted_password = encrypt_password(&master.password, &password);
 
     let updated_account = Account {
@@ -287,7 +286,7 @@ fn update_account_details(conn: &Connection, account: &mut Account) {
         description: description,
     };
 
-    match update_account(conn, &updated_account) {
+    match update_account(pool, &updated_account).await {
         Ok(_) => {
             println!("Account with ID {} was updated successfully.", updated_account.id);
         }
@@ -312,7 +311,7 @@ impl Drop for MasterCredentials {
 /// Takes user input
 /// 
 /// Returns [`MasterCredentials`] with username and password
-fn obtain_master_credentials(conn: &Connection) -> MasterCredentials {
+async fn obtain_master_credentials(pool: &SqlitePool) -> MasterCredentials {
     let mut attempts = 3;
 
     loop {
@@ -326,7 +325,7 @@ fn obtain_master_credentials(conn: &Connection) -> MasterCredentials {
         print!("Enter master password: ");
         let password = get_password();
 
-        match verify_master(conn, &username, &password) {
+        match verify_master(pool, &username, &password).await {
             Ok(true) => {
                 println!("Logging in...");
                 return MasterCredentials { username, password };
@@ -343,12 +342,12 @@ fn obtain_master_credentials(conn: &Connection) -> MasterCredentials {
     }
 }
 
-fn handle_change_master_password(conn: &Connection) {
+async fn handle_change_master_password(pool: &SqlitePool) {
     println!("Login with master account to update:");
 
-    let master_creds = obtain_master_credentials(conn);
+    let master_creds = obtain_master_credentials(pool).await;
 
-    match get_master_by_username(conn, &master_creds.username) {
+    match get_master_by_username(pool, &master_creds.username).await {
         Ok(master) => {
             let username = if SINGLE_MASTER_FLAG {
                 master.username.clone()
@@ -373,7 +372,7 @@ fn handle_change_master_password(conn: &Connection) {
                 password: password
             };
 
-            match update_master(conn, &updated_master) {
+            match update_master(pool, &updated_master).await {
                 Ok(_) => {
                     println!("Account with ID {} was updated successfully.", updated_master.id);
                 }

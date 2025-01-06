@@ -19,5 +19,5 @@ async fn main() {
     };
 
     // Start the user interface loop
-    start_ui_loop(&pool);
+    start_ui_loop(&pool).await;
 }
