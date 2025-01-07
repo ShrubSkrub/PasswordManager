@@ -1,4 +1,4 @@
-# Password Manager - Locally Hosted
+# Password Manager
 A simple, locally hosted password manager built for fun in Rust. This application securely stores your passwords using AES-GCM encryption for passwords and Argon2 for password hashing. All data is stored locally in a SQLite database, allowing for ease of use.
 
 The system supports basic CRUD operations.  Other features such as MFA and toolchain support may come later. (Maybe even a real UI!)
