@@ -15,10 +15,11 @@ pub struct Account {
     pub password: String,
     pub url: Option<String>,
     pub description: Option<String>,
+    pub master_id: i32,
 }
 
 impl Account {
-    pub fn new(name: String, username: String, password: String, url: Option<String>, description: Option<String>) -> Self {
+    pub fn new(name: String, username: String, password: String, url: Option<String>, description: Option<String>, master_id: i32) -> Self {
         Account {
             id: 0, // Placeholder value, ID will be assigned automatically
             name,
@@ -26,6 +27,7 @@ impl Account {
             password,
             url,
             description,
+            master_id,
         }
     }
 }
@@ -102,13 +104,14 @@ pub async fn initialize_db() -> anyhow::Result<PgPool> {
 pub async fn add_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
     // Account id assigned automatically
     sqlx::query!(
-        "INSERT INTO accounts (name, username, password, url, description) 
-        VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO accounts (name, username, password, url, description, master_id) 
+        VALUES ($1, $2, $3, $4, $5, $6)",
         account.name,
         account.username,
         account.password,
         account.url,
-        account.description
+        account.description,
+        account.master_id
     )
     .execute(pool)
     .await?; 
@@ -118,7 +121,7 @@ pub async fn add_account(pool: &PgPool, account: &Account) -> anyhow::Result<()>
 
 pub async fn get_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Account> {
     let account = sqlx::query_as!(Account,
-        "SELECT id, name, username, password, url, description
+        "SELECT id, name, username, password, url, description, master_id
         FROM accounts WHERE id = $1",
         id
     )
@@ -130,7 +133,7 @@ pub async fn get_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Account
 
 pub async fn get_account_by_name(pool: &PgPool, name: &String) -> anyhow::Result<Account> {
     let row = sqlx::query!(
-        "SELECT id, name, username, password, url, description
+        "SELECT id, name, username, password, url, description, master_id
         FROM accounts WHERE name = $1",
         name
     )
@@ -144,6 +147,7 @@ pub async fn get_account_by_name(pool: &PgPool, name: &String) -> anyhow::Result
         password: row.password,
         url: row.url,
         description: row.description,
+        master_id: row.master_id,
     };
 
     Ok(account)
@@ -224,13 +228,14 @@ pub async fn search_accounts_by_name(pool: &PgPool, name: &String) -> anyhow::Re
 pub async fn update_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
     let query_result = sqlx::query!(
         "UPDATE accounts 
-        SET name = $1, username = $2, password = $3, url = $4, description = $5 
-        WHERE id = $6",
+        SET name = $1, username = $2, password = $3, url = $4, description = $5, master_id = $6
+        WHERE id = $7",
         account.name,
         account.username,
         account.password,
         account.url,
         account.description,
+        account.master_id,
         account.id
     )
     .execute(pool)

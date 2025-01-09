@@ -1,6 +1,5 @@
 use std::{io::{self, Write}, process};
 use sqlx::postgres::PgPool;
-use zeroize::Zeroize;
 
 use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{decrypt_password, encrypt_password, hash_master_password}};
 
@@ -97,7 +96,7 @@ async fn handle_add_account(pool: &PgPool) {
     let master = obtain_master_credentials(pool).await;
     let encrypted_password = encrypt_password(&master.password, &password);
 
-    let account = Account::new(name, username, encrypted_password, url, description);
+    let account = Account::new(name, username, encrypted_password, url, description, master.id);
 
     match add_account(pool, &account).await {
         Ok(_result) => { ()
@@ -284,6 +283,7 @@ async fn update_account_details(pool: &PgPool, account: &mut Account) {
         password: encrypted_password,
         url: url,
         description: description,
+        master_id: account.master_id, // Keep the same master_id
     };
 
     match update_account(pool, &updated_account).await {
@@ -296,22 +296,10 @@ async fn update_account_details(pool: &PgPool, account: &mut Account) {
     }
 }
 
-/// Return type for [`obtain_master_credentials()`]
-struct MasterCredentials {
-    username: String,
-    password: String,
-}
-
-impl Drop for MasterCredentials {
-    fn drop(&mut self) {
-        self.username.zeroize();
-        self.password.zeroize();
-    }
-}
 /// Takes user input
 /// 
-/// Returns [`MasterCredentials`] with username and password
-async fn obtain_master_credentials(pool: &PgPool) -> MasterCredentials {
+/// Returns a Master struct
+async fn obtain_master_credentials(pool: &PgPool) -> Master {
     let mut attempts = 3;
 
     loop {
@@ -324,11 +312,12 @@ async fn obtain_master_credentials(pool: &PgPool) -> MasterCredentials {
 
         print!("Enter master password: ");
         let password = get_password();
-
+        
         match verify_master(pool, &username, &password).await {
             Ok(true) => {
                 println!("Logging in...");
-                return MasterCredentials { username, password };
+                let id = get_master_by_username(pool, &username).await.unwrap().id;
+                return Master { id, username, password };
             },
             Ok(false) | Err(_) => {
                 attempts -= 1;
