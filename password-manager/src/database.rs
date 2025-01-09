@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use sqlx::prelude::FromRow;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use sqlx::postgres::{PgConnectOptions, PgPool};
 use zeroize::Zeroize;
 use anyhow;
 
@@ -9,7 +9,7 @@ use crate::{compile_config::DB_PATH, encryption::{hash_master_password, verify_m
 
 #[derive(Debug, FromRow)]
 pub struct Account {
-    pub id: i64,  // SQLite uses `i64` for integer keys
+    pub id: i32,  // PostgreSQL uses `i32` for integer keys
     pub name: String,
     pub username: String,
     pub password: String,
@@ -43,7 +43,7 @@ impl Drop for Account {
 
 #[derive(Debug, FromRow)]
 pub struct AccountSummary {
-    pub id: i64,
+    pub id: i32,
     pub name: String,
     pub description: Option<String>,
 }
@@ -52,7 +52,7 @@ pub struct AccountSummary {
 // TODO Add a way to match masters to their own accounts
 #[derive(Debug, FromRow)]
 pub struct Master {
-    pub id: i64,
+    pub id: i32,
     pub username: String,
     pub password: String
 }
@@ -75,40 +75,19 @@ impl Drop for Master {
     }
 }
 
-pub async fn initialize_db() -> anyhow::Result<SqlitePool> {
-    let options = SqliteConnectOptions::from_str(DB_PATH)?
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
-    let pool = SqlitePool::connect_with(options).await?;
+pub async fn initialize_db() -> anyhow::Result<PgPool> {
+    let options = PgConnectOptions::from_str(DB_PATH)?;
+    let pool = PgPool::connect_with(options).await?;
 
-    sqlx::query!(
-        "CREATE TABLE IF NOT EXISTS accounts (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL UNIQUE,
-            url TEXT,
-            username TEXT NOT NULL,
-            password TEXT NOT NULL,
-            description TEXT
-        )"
-    )
-    .execute(&pool)
-    .await?; 
-
-    sqlx::query!(
-        "create table if not exists masters (
-            id integer primary key,
-            username text not null,
-            password text not null
-        )"
-    )
-    .execute(&pool)
-    .await?; 
+    // Run migrations
+    sqlx::migrate!().run(&pool).await?;
 
     // Insert the default account only if there are no accounts in the table
     let default_master_password_hash = hash_master_password(&"changethis".to_string()).expect("Error hashing password!");
     sqlx::query!(
-        "insert into masters (username, password)
-        select 'default', ?
-        where not exists (select 1 from masters)",
+        "INSERT INTO masters (username, password)
+        SELECT 'default', $1
+        WHERE NOT EXISTS (SELECT 1 FROM masters)",
         default_master_password_hash
     )
     .execute(&pool)
@@ -120,11 +99,11 @@ pub async fn initialize_db() -> anyhow::Result<SqlitePool> {
 // ----------------------------------------------------------------------------
 // Accounts -------------------------------------------------------------------
 
-pub async fn add_account(pool: &SqlitePool, account: &Account) -> anyhow::Result<()> {
+pub async fn add_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
     // Account id assigned automatically
     sqlx::query!(
         "INSERT INTO accounts (name, username, password, url, description) 
-        VALUES (?1, ?2, ?3, ?4, ?5)",
+        VALUES ($1, $2, $3, $4, $5)",
         account.name,
         account.username,
         account.password,
@@ -137,10 +116,10 @@ pub async fn add_account(pool: &SqlitePool, account: &Account) -> anyhow::Result
     Ok(())
 }
 
-pub async fn get_account_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Account> {
+pub async fn get_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Account> {
     let account = sqlx::query_as!(Account,
         "SELECT id, name, username, password, url, description
-        FROM accounts WHERE id = ?",
+        FROM accounts WHERE id = $1",
         id
     )
     .fetch_one(pool)
@@ -149,17 +128,17 @@ pub async fn get_account_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Acc
     Ok(account)
 }
 
-pub async fn get_account_by_name(pool: &SqlitePool, name: &String) -> anyhow::Result<Account> {
+pub async fn get_account_by_name(pool: &PgPool, name: &String) -> anyhow::Result<Account> {
     let row = sqlx::query!(
         "SELECT id, name, username, password, url, description
-        FROM accounts WHERE name = ?",
+        FROM accounts WHERE name = $1",
         name
     )
     .fetch_one(pool)
     .await?;
 
     let account = Account {
-        id: row.id.expect("account.id was null"), // sqlx interprets id as Option
+        id: row.id,
         name: row.name,
         username: row.username,
         password: row.password,
@@ -171,11 +150,11 @@ pub async fn get_account_by_name(pool: &SqlitePool, name: &String) -> anyhow::Re
 }
 
 // TODO Make return account, and handle printing in user_interface.rs instead
-pub async fn delete_account_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<()> {
+pub async fn delete_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<()> {
     match get_account_by_id(pool, id).await {
         Ok(returned_account) => {
             let query_result = sqlx::query!(
-                "DELETE FROM accounts WHERE id = ?",
+                "DELETE FROM accounts WHERE id = $1",
                 id
             )
             .execute(pool)
@@ -197,11 +176,11 @@ pub async fn delete_account_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<
 }
 
 // TODO Make return account, and handle printing in user_interface.rs instead
-pub async fn delete_account_by_name(pool: &SqlitePool, name: &String) -> anyhow::Result<()> {
+pub async fn delete_account_by_name(pool: &PgPool, name: &String) -> anyhow::Result<()> {
     match get_account_by_name(pool, name).await {
         Ok(returned_account) => {
             let query_result = sqlx::query!(
-                "DELETE FROM accounts WHERE name = ?",
+                "DELETE FROM accounts WHERE name = $1",
                 name
             )
             .execute(pool)
@@ -223,7 +202,7 @@ pub async fn delete_account_by_name(pool: &SqlitePool, name: &String) -> anyhow:
 }
 
 // TODO Add a function for pagination
-pub async fn list_accounts(pool: &SqlitePool) -> anyhow::Result<Vec<AccountSummary>> {
+pub async fn list_accounts(pool: &PgPool) -> anyhow::Result<Vec<AccountSummary>> {
     // List all account ids, names, and descriptions from the database
     let summaries = sqlx::query_as!(AccountSummary,
         "SELECT id, name, description FROM accounts"
@@ -234,19 +213,19 @@ pub async fn list_accounts(pool: &SqlitePool) -> anyhow::Result<Vec<AccountSumma
     Ok(summaries)
 }
 
-pub async fn search_accounts_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Vec<AccountSummary>>{
+pub async fn search_accounts_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Vec<AccountSummary>>{
     unimplemented!()
 }
 
-pub async fn search_accounts_by_name(pool: &SqlitePool, name: &String) -> anyhow::Result<Vec<AccountSummary>>{
+pub async fn search_accounts_by_name(pool: &PgPool, name: &String) -> anyhow::Result<Vec<AccountSummary>>{
     unimplemented!()
 }
 
-pub async fn update_account(pool: &SqlitePool, account: &Account) -> anyhow::Result<()> {
+pub async fn update_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
     let query_result = sqlx::query!(
         "UPDATE accounts 
-        SET name = ?, username = ?, password = ?, url = ?, description = ? 
-        WHERE id = ?",
+        SET name = $1, username = $2, password = $3, url = $4, description = $5 
+        WHERE id = $6",
         account.name,
         account.username,
         account.password,
@@ -267,11 +246,11 @@ pub async fn update_account(pool: &SqlitePool, account: &Account) -> anyhow::Res
 
 // ----------------------------------------------------------------------------
 // Masters --------------------------------------------------------------------
-pub async fn add_master(pool: &SqlitePool, master: &Master) -> anyhow::Result<()> {
+pub async fn add_master(pool: &PgPool, master: &Master) -> anyhow::Result<()> {
     // Master id assigned automatically
     sqlx::query!(
         "INSERT INTO masters (username, password) 
-        VALUES (?, ?)",
+        VALUES ($1, $2)",
         master.username,
         master.password
     )
@@ -280,10 +259,10 @@ pub async fn add_master(pool: &SqlitePool, master: &Master) -> anyhow::Result<()
 
     Ok(())
 }
-pub async fn get_master_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Master> {
+pub async fn get_master_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Master> {
     let master = sqlx::query_as!(Master,
         "SELECT id, username, password
-        FROM masters WHERE id = ?",
+        FROM masters WHERE id = $1",
         id
     )
     .fetch_one(pool)
@@ -292,10 +271,10 @@ pub async fn get_master_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Mast
     Ok(master)
 }
 
-pub async fn get_master_by_username(pool: &SqlitePool, username: &String) -> anyhow::Result<Master> {
+pub async fn get_master_by_username(pool: &PgPool, username: &String) -> anyhow::Result<Master> {
     let master = sqlx::query_as!(Master,
         "SELECT id, username, password
-        FROM masters WHERE username = ?",
+        FROM masters WHERE username = $1",
         username
     )
     .fetch_one(pool)
@@ -304,11 +283,11 @@ pub async fn get_master_by_username(pool: &SqlitePool, username: &String) -> any
     Ok(master)
 }
 
-pub async fn delete_master_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<()> {
+pub async fn delete_master_by_id(pool: &PgPool, id: i32) -> anyhow::Result<()> {
     match get_master_by_id(pool, id).await {
         Ok(returned_master) => {
             let query_result = sqlx::query!(
-                "DELETE FROM masters WHERE id = ?",
+                "DELETE FROM masters WHERE id = $1",
                 id
             )
             .execute(pool)
@@ -329,11 +308,11 @@ pub async fn delete_master_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<(
     }
 }
 
-pub async fn delete_master_by_username(pool: &SqlitePool, username: &String) -> anyhow::Result<()> {
+pub async fn delete_master_by_username(pool: &PgPool, username: &String) -> anyhow::Result<()> {
     match get_master_by_username(pool, username).await {
         Ok(returned_master) => {
             let query_result = sqlx::query!(
-                "DELETE FROM masters WHERE username = ?",
+                "DELETE FROM masters WHERE username = $1",
                 username
             )
             .execute(pool)
@@ -355,7 +334,7 @@ pub async fn delete_master_by_username(pool: &SqlitePool, username: &String) -> 
 }
 
 // TODO Don't return password? Maybe make another struct
-pub async fn list_master_accounts(pool: &SqlitePool) -> anyhow::Result<Vec<Master>> {
+pub async fn list_master_accounts(pool: &PgPool) -> anyhow::Result<Vec<Master>> {
     let summaries = sqlx::query_as!(Master,
         "SELECT id, username, password FROM masters"
     )
@@ -366,11 +345,11 @@ pub async fn list_master_accounts(pool: &SqlitePool) -> anyhow::Result<Vec<Maste
 }
 
 
-pub async fn update_master(pool: &SqlitePool, master: &Master) -> anyhow::Result<()> {
+pub async fn update_master(pool: &PgPool, master: &Master) -> anyhow::Result<()> {
     let query_result = sqlx::query!(
         "UPDATE masters 
-        SET username = ?, password = ?
-        WHERE id = ?",
+        SET username = $1, password = $2
+        WHERE id = $3",
         master.username,
         master.password,
         master.id
@@ -385,7 +364,7 @@ pub async fn update_master(pool: &SqlitePool, master: &Master) -> anyhow::Result
     Ok(())
 }
 
-pub async fn verify_master(pool: &SqlitePool, username: &String, password: &String) -> anyhow::Result<bool> {
+pub async fn verify_master(pool: &PgPool, username: &String, password: &String) -> anyhow::Result<bool> {
     let stored_master = get_master_by_username(pool, username).await?;
 
     if verify_master_password(&stored_master.password, &password){

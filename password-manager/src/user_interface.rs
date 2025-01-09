@@ -1,5 +1,5 @@
 use std::{io::{self, Write}, process};
-use sqlx::{sqlite::{SqliteConnectOptions, SqlitePool}, Sqlite};
+use sqlx::postgres::PgPool;
 use zeroize::Zeroize;
 
 use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{decrypt_password, encrypt_password, hash_master_password}};
@@ -19,7 +19,7 @@ fn display_main_menu() {
     println!("x. Exit");
 }
 
-pub async fn start_ui_loop(pool: &SqlitePool) {
+pub async fn start_ui_loop(pool: &PgPool) {
     let _result = obtain_master_credentials(pool).await;
     loop {
         display_main_menu();
@@ -73,7 +73,7 @@ fn get_password() -> String {
     }
 }
 
-async fn handle_add_account(pool: &SqlitePool) {
+async fn handle_add_account(pool: &PgPool) {
     println!("Enter account name (ie. Google, X, Discord): ");
     let name = get_user_input();
 
@@ -136,7 +136,7 @@ fn print_account_details(account: &Account, master_password: &String) {
     }
 }
 
-async fn handle_list_accounts(pool: &SqlitePool) {
+async fn handle_list_accounts(pool: &PgPool) {
     println!("Listing accounts: ");
 
     match list_accounts(pool).await {
@@ -152,12 +152,12 @@ async fn handle_list_accounts(pool: &SqlitePool) {
     }
 }
 
-async fn handle_get_account(pool: &SqlitePool) {
+async fn handle_get_account(pool: &PgPool) {
     println!("Enter account ID or name:");
     let user_input = get_user_input();
 
     // Automatically determine if id or name
-    if let Ok(id) = user_input.parse::<i64>() {
+    if let Ok(id) = user_input.parse::<i32>() {
         match get_account_by_id(pool, id).await {
             Ok(account) => {
                 let master = obtain_master_credentials(pool).await;
@@ -180,12 +180,12 @@ async fn handle_get_account(pool: &SqlitePool) {
     }
 }
 
-async fn handle_delete_account(pool: &SqlitePool) {
+async fn handle_delete_account(pool: &PgPool) {
     println!("Enter account ID or name:");
     let user_input = get_user_input();
 
     // Automatically determine if id or name
-    if let Ok(id) = user_input.parse::<i64>() {
+    if let Ok(id) = user_input.parse::<i32>() {
         match delete_account_by_id(pool, id).await {
             Ok(account) => {
                 account
@@ -206,12 +206,12 @@ async fn handle_delete_account(pool: &SqlitePool) {
     }
 }
 
-async fn handle_update_account(pool: &SqlitePool) {
+async fn handle_update_account(pool: &PgPool) {
     println!("Enter the account ID or name to update:");
 
     let input = get_user_input();
     
-    match input.parse::<i64>() {
+    match input.parse::<i32>() {
         Ok(id) => {
             match get_account_by_id(pool, id).await {
                 Ok(mut account) => {
@@ -237,7 +237,7 @@ async fn handle_update_account(pool: &SqlitePool) {
 }
 
 /// Helper function for handle_update_account()
-async fn update_account_details(pool: &SqlitePool, account: &mut Account) {
+async fn update_account_details(pool: &PgPool, account: &mut Account) {
     println!("\nCurrent account details:");
     println!("Name: {}", account.name);
     println!("Username: {}", account.username);
@@ -311,7 +311,7 @@ impl Drop for MasterCredentials {
 /// Takes user input
 /// 
 /// Returns [`MasterCredentials`] with username and password
-async fn obtain_master_credentials(pool: &SqlitePool) -> MasterCredentials {
+async fn obtain_master_credentials(pool: &PgPool) -> MasterCredentials {
     let mut attempts = 3;
 
     loop {
@@ -342,7 +342,7 @@ async fn obtain_master_credentials(pool: &SqlitePool) -> MasterCredentials {
     }
 }
 
-async fn handle_change_master_password(pool: &SqlitePool) {
+async fn handle_change_master_password(pool: &PgPool) {
     println!("Login with master account to update:");
 
     let master_creds = obtain_master_credentials(pool).await;
