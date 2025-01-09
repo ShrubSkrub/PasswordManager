@@ -215,7 +215,7 @@ async fn handle_update_account(pool: &PgPool) {
         Ok(id) => {
             match get_account_by_id(pool, id).await {
                 Ok(mut account) => {
-                    update_account_details(pool, &mut account);
+                    update_account_details(pool, &mut account).await;
                 }
                 Err(_) => {
                     println!("No account found with ID: {}", id);
@@ -226,7 +226,7 @@ async fn handle_update_account(pool: &PgPool) {
             let name = input.trim().to_string();
             match get_account_by_name(pool, &name).await {
                 Ok(mut account) => {
-                    update_account_details(pool, &mut account);
+                    update_account_details(pool, &mut account).await;
                 }
                 Err(_) => {
                     println!("No account found with name: {}", name);
