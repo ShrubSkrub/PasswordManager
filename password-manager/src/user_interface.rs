@@ -382,7 +382,7 @@ async fn handle_change_master_password(pool: &PgPool) {
 }
 
 async fn handle_search_accounts(pool: &PgPool) {
-    print!("Enter search term:");
+    print!("Enter search term: ");
     let search_query = get_user_input();
 
     match search_accounts(pool, &search_query).await {
