@@ -1,7 +1,7 @@
 use std::{io::{self, Write}, process};
 use sqlx::postgres::PgPool;
 
-use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, search_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{decrypt_password, encrypt_password}};
+use crate::{compile_config::DEBUG_FLAG, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, search_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{decrypt_password, encrypt_password}};
 
 fn print_separator() {
     println!("------------------------------");
@@ -314,12 +314,8 @@ async fn obtain_master_credentials(pool: &PgPool) -> Master {
     let mut attempts = 3;
 
     loop {
-        let username = if SINGLE_MASTER_FLAG {
-            "default".to_string()
-        } else {
-            print!("Enter master username: ");
-            get_user_input()
-        };
+        print!("Enter master username: ");
+        let username = get_user_input();
 
         print!("Enter master password: ");
         let password = get_password();
@@ -349,13 +345,9 @@ async fn handle_change_master_password(pool: &PgPool) {
 
     match get_master_by_username(pool, &master_creds.username).await {
         Ok(master) => {
-            let username = if SINGLE_MASTER_FLAG {
-                master.username.clone()
-            } else {
-                println!("Enter the new username (leave empty to keep current):");
-                let input_username = get_user_input();
-                if input_username.is_empty() { master.username.clone() } else { input_username }
-            };
+            println!("Enter the new username (leave empty to keep current):");
+            let input_username = get_user_input();
+            let username = if input_username.is_empty() { master.username.clone() } else { input_username };
 
             println!("Enter the new password:");
             let plaintext_password = get_password();
