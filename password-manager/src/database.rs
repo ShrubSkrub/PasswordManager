@@ -5,7 +5,7 @@ use sqlx::postgres::{PgConnectOptions, PgPool};
 use zeroize::Zeroize;
 use anyhow;
 
-use crate::{compile_config::DB_PATH, encryption::{hash_master_password, verify_master_password}};
+use crate::{compile_config::DB_PATH, encryption::{hash_master_password, verify_master_password, reencrypt_password}};
 
 #[derive(Debug, FromRow)]
 pub struct Account {
@@ -59,15 +59,15 @@ pub struct Master {
     pub password: String
 }
 
-impl Master {
-    pub fn new(username: String, password: String) -> Self {
-        Master {
-            id: 0, // Placeholder value, ID will be assigned automatically
-            username,
-            password
-        }
-    }
-}
+// impl Master {
+//     pub fn new(username: String, password: String) -> Self {
+//         Master {
+//             id: 0, // Placeholder value, ID will be assigned automatically
+//             username,
+//             password
+//         }
+//     }
+// }
 
 impl Drop for Master {
     fn drop(&mut self) {
@@ -248,6 +248,33 @@ pub async fn update_account(pool: &PgPool, account: &Account) -> anyhow::Result<
     Ok(())
 }
 
+pub async fn update_accounts_passwords(pool: &PgPool, ids_and_passwords: &Vec<(i32, String)>) -> anyhow::Result<()> {
+    let mut query = String::from("UPDATE accounts SET password = CASE id ");
+    let mut ids = Vec::new();
+
+    for (id, new_password) in ids_and_passwords {
+        query.push_str(&format!("WHEN {} THEN '{}' ", id, new_password));
+        ids.push(id);
+    }
+
+    query.push_str("END WHERE id IN (");
+    for (i, id) in ids.iter().enumerate() {
+        if i > 0 {
+            query.push_str(", ");
+        }
+        query.push_str(&id.to_string());
+    }
+    query.push_str(")");
+
+    let query_result = sqlx::query(&query).execute(pool).await?;
+
+    if query_result.rows_affected() == 0 {
+        return Err(anyhow::anyhow!("UPDATE failed: Query returned no rows"));
+    }
+
+    Ok(())
+}
+
 
 // ----------------------------------------------------------------------------
 // Masters --------------------------------------------------------------------
@@ -350,14 +377,15 @@ pub async fn list_master_accounts(pool: &PgPool) -> anyhow::Result<Vec<Master>> 
 }
 
 
-pub async fn update_master(pool: &PgPool, master: &Master) -> anyhow::Result<()> {
+pub async fn update_master(pool: &PgPool, old_master: &Master, new_master: &Master) -> anyhow::Result<()> {
+    let hashed_password = hash_master_password(&new_master.password).expect("Error hashing password");
     let query_result = sqlx::query!(
         "UPDATE masters 
         SET username = $1, password = $2
         WHERE id = $3",
-        master.username,
-        master.password,
-        master.id
+        new_master.username,
+        hashed_password,
+        new_master.id
     )
     .execute(pool)
     .await?; 
@@ -365,6 +393,30 @@ pub async fn update_master(pool: &PgPool, master: &Master) -> anyhow::Result<()>
     if query_result.rows_affected() == 0 {
         return Err(anyhow::anyhow!("UPDATE failed: Query returned no rows"))
     }
+
+    let ids_and_passwords = sqlx::query!(
+        "SELECT id, password FROM accounts WHERE master_id = $1",
+        old_master.id
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|row| (row.id, row.password))
+    .collect::<Vec<(i32, String)>>();
+
+    let mut ids_and_encrypted_pass = Vec::new();
+    for (id, encrypted_password) in ids_and_passwords {
+        match reencrypt_password(&old_master.password, &new_master.password, &encrypted_password) {
+            Ok(new_encrypted_password) => {
+                ids_and_encrypted_pass.push((id, new_encrypted_password));
+            }
+            Err(e) => {
+                eprintln!("Failed to re-encrypt password for account ID {}: {:?}", id, e);
+                return Err(anyhow::anyhow!("Failed to re-encrypt password for account ID {}: {:?}", id, e));
+            }
+        }
+    }
+    update_accounts_passwords(pool, &ids_and_encrypted_pass).await?;
 
     Ok(())
 }

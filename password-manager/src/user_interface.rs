@@ -1,7 +1,7 @@
 use std::{io::{self, Write}, process};
 use sqlx::postgres::PgPool;
 
-use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{decrypt_password, encrypt_password, hash_master_password}};
+use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{decrypt_password, encrypt_password}};
 
 fn print_separator() {
     println!("------------------------------");
@@ -26,6 +26,7 @@ pub async fn start_ui_loop(pool: &PgPool) {
         print!("Please choose an option: ");
         let user_choice = get_user_input();
         println!("==============================");
+        print!("\x1B[2J\x1B[1;1H"); // ANSI escape code to clear the screen
 
         match user_choice.as_str() {
             "1" => {
@@ -123,7 +124,13 @@ fn print_account_details(account: &Account, master_password: &String) {
     println!("Username: {}", account.username);
 
     // Decrypt password before showing
-    let decrypted_password = decrypt_password(master_password, &account.password);
+    let decrypted_password = match decrypt_password(master_password, &account.password) {
+        Ok(password) => password,
+        Err(err) => {
+            println!("Failed to decrypt password: {}", err);
+            return;
+        }
+    };
     println!("Password: {}", decrypted_password);
     match &account.url {
         Some(url) => println!("URL: {}", url),
@@ -346,22 +353,16 @@ async fn handle_change_master_password(pool: &PgPool) {
                 if input_username.is_empty() { master.username.clone() } else { input_username }
             };
 
-            println!("Enter the new password (leave empty to keep current):");
-            let password = get_password();
-            let password = if password.is_empty() {
-                master.password.clone() 
-            } else {
-                // Hash password before adding
-                hash_master_password(&password).expect("Error hashing password")
-            };
+            println!("Enter the new password:");
+            let plaintext_password = get_password();
 
             let updated_master = Master {
                 id: master.id,
                 username: username,
-                password: password
+                password: plaintext_password
             };
 
-            match update_master(pool, &updated_master).await {
+            match update_master(pool, &master_creds, &updated_master).await {
                 Ok(_) => {
                     println!("Account with ID {} was updated successfully.", updated_master.id);
                 }

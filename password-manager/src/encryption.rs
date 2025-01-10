@@ -115,14 +115,14 @@ pub fn encrypt_password(master_password: &String, password: &String) -> String {
 /// # Returns
 /// 
 /// Returns the plaintext password
-pub fn decrypt_password(master_password: &String, encrypted_data_string: &String) -> String {
+pub fn decrypt_password(master_password: &String, encrypted_data_string: &String) -> Result<String> {
     // Decode from base64 first
-    let encrypted_data = URL_SAFE.decode(encrypted_data_string).expect("Failed to decode password string");
+    let encrypted_data = URL_SAFE.decode(encrypted_data_string).map_err(|e| anyhow::anyhow!("Failed to decode password string: {:?}", e))?;
 
     // Split salt and ciphertext
     // Salt is last 22 bytes
     let (remaining_string, salt) = encrypted_data.split_at(encrypted_data.len() - 22);  
-    let salt = std::str::from_utf8(salt).unwrap();
+    let salt = std::str::from_utf8(salt).map_err(|e| anyhow::anyhow!("Failed to parse salt: {:?}", e))?;
 
     // Split nonce and ciphertext
     // The nonce is the first 12 bytes
@@ -134,14 +134,27 @@ pub fn decrypt_password(master_password: &String, encrypted_data_string: &String
     let cipher = Aes256Gcm::new(&key);
 
     // Attempt decryption and capture the error
-    match cipher.decrypt(nonce.into(), ciphertext) {
-        Ok(decrypted_data) => {
-            let decrypted_password = String::from_utf8_lossy(&decrypted_data).to_string();
-            decrypted_password
-        }
-        Err(e) => {
-            eprintln!("Decryption failed with error: {:?}", e);
-            panic!("Failed to decrypt the password");
-        }
-    }
+    let decrypted_data = cipher.decrypt(nonce.into(), ciphertext).map_err(|e| anyhow::anyhow!("Decryption failed: {:?}", e))?;
+    let decrypted_password = String::from_utf8_lossy(&decrypted_data).to_string();
+    Ok(decrypted_password)
+}
+/// Re-encrypts the password with a new master password
+/// 
+/// # Arguments
+/// 
+/// * old_master_password: Plaintext old master password
+/// * old_encrypted_password: Base64 encoded string of old encrypted password
+/// * new_master_password: Plaintext new master password
+/// 
+/// # Returns
+/// 
+/// Returns a base-64 encoded string of the re-encrypted password
+pub fn reencrypt_password(old_master_password: &String,new_master_password: &String, encrypted_password: &String) -> Result<String> {
+    // Decrypt the old encrypted password
+    let plaintext_password = decrypt_password(old_master_password, encrypted_password)?;
+
+    // Encrypt the plaintext password with the new master password
+    let new_encrypted_password = encrypt_password(new_master_password, &plaintext_password);
+
+    Ok(new_encrypted_password)
 }
