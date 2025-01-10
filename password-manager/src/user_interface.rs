@@ -1,7 +1,8 @@
 use std::{io::{self, Write}, process};
 use sqlx::postgres::PgPool;
 
-use crate::{compile_config::DEBUG_FLAG, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, search_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{decrypt_password, encrypt_password}};
+use password_manager_shared::{encryption::{decrypt_password, encrypt_password}, models::{Account, AccountSummary, Master}};
+use crate::{compile_config::DEBUG_FLAG, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, search_accounts, update_account, update_master, verify_master}};
 
 fn print_separator() {
     println!("------------------------------");

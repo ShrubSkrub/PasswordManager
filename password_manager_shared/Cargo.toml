@@ -1,0 +1,13 @@
+[package]
+name = "password_manager_shared"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0.217", features = ["derive"] }
+zeroize = "1.8.1"
+anyhow = "1.0.95"
+argon2 = "0.5.3"
+base64 = "0.22.1"
+rand_core = "0.6.4"
+aes-gcm = "0.10.3"

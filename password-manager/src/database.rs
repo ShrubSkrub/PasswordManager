@@ -1,81 +1,10 @@
 use std::str::FromStr;
 
-use sqlx::prelude::FromRow;
 use sqlx::postgres::{PgConnectOptions, PgPool};
-use zeroize::Zeroize;
 use anyhow;
 
-use crate::{compile_config::DB_PATH, encryption::{hash_master_password, verify_master_password, reencrypt_password}};
-
-#[derive(Debug, FromRow)]
-pub struct Account {
-    pub id: i32,  // PostgreSQL uses `i32` for integer keys
-    pub name: String,
-    pub username: String,
-    pub password: String,
-    pub url: Option<String>,
-    pub description: Option<String>,
-    pub master_id: i32,
-}
-
-impl Account {
-    pub fn new(name: String, username: String, password: String, url: Option<String>, description: Option<String>, master_id: i32) -> Self {
-        Account {
-            id: 0, // Placeholder value, ID will be assigned automatically
-            name,
-            username,
-            password,
-            url,
-            description,
-            master_id,
-        }
-    }
-}
-
-impl Drop for Account {
-    fn drop(&mut self) {
-        self.username.zeroize();
-        self.password.zeroize();
-
-        if let Some(ref mut url) = self.url {
-            url.zeroize();
-        }
-    }
-}
-
-#[derive(Debug, FromRow)]
-pub struct AccountSummary {
-    pub id: i32,
-    pub name: String,
-    pub description: Option<String>,
-}
-
-// For now, this will be used to define a set of users who are able to access the passwords
-// TODO Add a way to match masters to their own accounts
-#[derive(Debug, FromRow)]
-pub struct Master {
-    pub id: i32,
-    pub username: String,
-    pub password: String
-}
-
-// impl Master {
-//     pub fn new(username: String, password: String) -> Self {
-//         Master {
-//             id: 0, // Placeholder value, ID will be assigned automatically
-//             username,
-//             password
-//         }
-//     }
-// }
-
-impl Drop for Master {
-    fn drop(&mut self) {
-        self.id.zeroize();
-        self.username.zeroize();
-        self.password.zeroize();
-    }
-}
+use password_manager_shared::{encryption::{hash_master_password, verify_master_password, reencrypt_password}, models::{Account, AccountSummary, Master}};
+use crate::compile_config::DB_PATH;
 
 pub async fn initialize_db() -> anyhow::Result<PgPool> {
     let options = PgConnectOptions::from_str(DB_PATH)?;

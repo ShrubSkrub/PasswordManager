@@ -1,7 +1,6 @@
 mod database;
-mod encryption;
-mod user_interface;
 mod compile_config;
+mod user_interface;
 
 use database::initialize_db;
 use user_interface::start_ui_loop;
