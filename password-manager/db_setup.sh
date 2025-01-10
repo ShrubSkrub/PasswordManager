@@ -8,6 +8,10 @@ DB_HOST="localhost"
 DB_PORT="5432"
 DB_URL="postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
 
+# Terminate all connections to the existing database
+echo "Terminating all connections to the existing database..."
+psql -U seanduarte -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME}';"
+
 # Drop the existing database (if it exists)
 echo "Dropping existing database if it exists..."
 psql -U seanduarte -d postgres -c "DROP DATABASE IF EXISTS ${DB_NAME};"
