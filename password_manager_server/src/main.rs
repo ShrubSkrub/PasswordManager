@@ -1,9 +1,7 @@
 mod database;
 mod compile_config;
-mod user_interface;
 
 use database::initialize_db;
-use user_interface::start_ui_loop;
 use std::process;
 
 #[tokio::main]
@@ -17,6 +15,6 @@ async fn main() {
         }
     };
 
-    // Start the user interface loop
-    start_ui_loop(&pool).await;
+    // TODO Start the server
+    unimplemented!()
 }
