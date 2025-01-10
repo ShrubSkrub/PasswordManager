@@ -1,7 +1,7 @@
 use std::{io::{self, Write}, process};
 use sqlx::postgres::PgPool;
 
-use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{decrypt_password, encrypt_password}};
+use crate::{compile_config::{DEBUG_FLAG, SINGLE_MASTER_FLAG}, database::{add_account, delete_account_by_id, delete_account_by_name, get_account_by_id, get_account_by_name, get_master_by_username, list_accounts, search_accounts, update_account, update_master, verify_master, Account, AccountSummary, Master}, encryption::{decrypt_password, encrypt_password}};
 
 fn print_separator() {
     println!("------------------------------");
@@ -9,12 +9,13 @@ fn print_separator() {
 fn display_main_menu() {
     println!("==============================");
     println!("Password Manager:");
-    println!("1. Add an account");
-    println!("2. List accounts");
-    println!("3. Retrieve an account");
-    println!("4. Update an account");
-    println!("5. Delete an account");
-    println!("6. Change master password");
+    println!("1. List accounts");
+    println!("2. Search accounts");
+    println!("3. Get account details");
+    println!("4. Add account");
+    println!("5. Update account");
+    println!("6. Delete account");
+    println!("7. Change master password");
     println!("x. Exit");
 }
 
@@ -24,30 +25,33 @@ pub async fn start_ui_loop(pool: &PgPool) {
         display_main_menu();
 
         print!("Please choose an option: ");
-        let user_choice = get_user_input();
+        let user_choice = get_user_input().to_lowercase();
         println!("==============================");
         print!("\x1B[2J\x1B[1;1H"); // ANSI escape code to clear the screen
 
         match user_choice.as_str() {
-            "1" => {
-                handle_add_account(pool).await;
-            }
-            "2" => {
+            "1" | "list" => {
                 handle_list_accounts(pool).await;
             }
-            "3" => {
+            "2" | "search" => {
+                handle_search_accounts(pool).await;
+            }
+            "3" | "get" => {
                 handle_get_account(pool).await;
             }
-            "4" => {
+            "4" | "add" => {
+                handle_add_account(pool).await;
+            }
+            "5" | "update" => {
                 handle_update_account(pool).await;
             }
-            "5" => {
+            "6" | "delete" => {
                 handle_delete_account(pool).await;
             }
-            "6" => {
+            "7" | "change" => {
                 handle_change_master_password(pool).await;
             }
-            "x" => {
+            "x" | "exit" => {
                 println!("Exiting...");
                 break;
             }
@@ -373,6 +377,23 @@ async fn handle_change_master_password(pool: &PgPool) {
         }
         Err(_) => {
             println!("No master found with that username: {}", master_creds.username);
+        }
+    }
+}
+
+async fn handle_search_accounts(pool: &PgPool) {
+    print!("Enter search term:");
+    let search_query = get_user_input();
+
+    match search_accounts(pool, &search_query).await {
+        Ok(results) => {
+            for account in results {
+                print_account_summary_details(&account);
+                print_separator();
+            }
+        },
+        Err(err) => {
+            println!("Failed to search accounts: {}", err);
         }
     }
 }

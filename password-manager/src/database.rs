@@ -217,12 +217,17 @@ pub async fn list_accounts(pool: &PgPool) -> anyhow::Result<Vec<AccountSummary>>
     Ok(summaries)
 }
 
-pub async fn search_accounts_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Vec<AccountSummary>>{
-    unimplemented!()
-}
+pub async fn search_accounts(pool: &PgPool, search_term: &String) -> anyhow::Result<Vec<AccountSummary>> {
+    let summaries = sqlx::query_as!(AccountSummary,
+        "SELECT id, name, description 
+        FROM accounts 
+        WHERE name ILIKE $1 OR description ILIKE $1",
+        format!("%{}%", search_term)
+    )
+    .fetch_all(pool)
+    .await?;
 
-pub async fn search_accounts_by_name(pool: &PgPool, name: &String) -> anyhow::Result<Vec<AccountSummary>>{
-    unimplemented!()
+    Ok(summaries)
 }
 
 pub async fn update_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
