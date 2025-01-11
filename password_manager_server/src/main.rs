@@ -1,8 +1,10 @@
 mod database;
 mod compile_config;
+mod routes;
 
 use database::initialize_db;
 use std::process;
+use actix_web::{web, App, HttpServer};
 
 #[tokio::main]
 async fn main() {
@@ -15,6 +17,15 @@ async fn main() {
         }
     };
 
-    // TODO Start the server
-    unimplemented!()
+    // Start the Actix web server
+    HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::new(pool.clone()))
+            .configure(routes::config)
+    })
+    .bind("127.0.0.1:8080")
+    .expect("Cannot bind to port 8080")
+    .run()
+    .await
+    .expect("Failed to run server");
 }

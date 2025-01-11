@@ -20,3 +20,4 @@ aes-gcm = "0.10.3"
 base64 = "0.22.1"
 sqlx = { version = "0.8.3", features = ["postgres", "chrono", "runtime-tokio", "migrate"] }
 tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
+actix-web = "4.9.0"

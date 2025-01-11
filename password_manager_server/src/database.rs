@@ -182,7 +182,7 @@ pub async fn update_account(pool: &PgPool, account: &Account) -> anyhow::Result<
     Ok(())
 }
 
-pub async fn update_accounts_passwords(pool: &PgPool, ids_and_passwords: &Vec<(i32, String)>) -> anyhow::Result<()> {
+async fn update_accounts_passwords(pool: &PgPool, ids_and_passwords: &Vec<(i32, String)>) -> anyhow::Result<()> {
     let mut query = String::from("UPDATE accounts SET password = CASE id ");
     let mut ids = Vec::new();
 
