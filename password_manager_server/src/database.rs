@@ -30,6 +30,9 @@ pub async fn initialize_db() -> anyhow::Result<PgPool> {
 // ----------------------------------------------------------------------------
 // Accounts -------------------------------------------------------------------
 
+/// Adds an [`Account`] to the database
+/// 
+/// Does not encrypt the password, must be encrypted before calling this function
 pub async fn add_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
     // Account id assigned automatically
     sqlx::query!(
@@ -48,6 +51,9 @@ pub async fn add_account(pool: &PgPool, account: &Account) -> anyhow::Result<()>
     Ok(())
 }
 
+/// Retrieves an account from the database by its id
+///
+/// password returned is base64 encoded and encrypted, must be decoded before use
 pub async fn get_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Account> {
     let account = sqlx::query_as!(Account,
         "SELECT id, name, username, password, url, description, master_id
@@ -311,6 +317,13 @@ pub async fn list_master_accounts(pool: &PgPool) -> anyhow::Result<Vec<Master>> 
 }
 
 
+/// Updates the master account with the given id of old_master to the values of new_master
+/// 
+/// Updates all accounts associated with the old master account to use the new master account's password
+/// 
+/// old_master.password and new_master.password should be plaintext
+///
+/// Returns an error if the UPDATE query fails or if the re-encryption of the account passwords fails
 pub async fn update_master(pool: &PgPool, old_master: &Master, new_master: &Master) -> anyhow::Result<()> {
     let hashed_password = hash_master_password(&new_master.password).expect("Error hashing password");
     let query_result = sqlx::query!(
@@ -319,7 +332,7 @@ pub async fn update_master(pool: &PgPool, old_master: &Master, new_master: &Mast
         WHERE id = $3",
         new_master.username,
         hashed_password,
-        new_master.id
+        old_master.id // Use old master id, since this is an update
     )
     .execute(pool)
     .await?; 
@@ -355,6 +368,8 @@ pub async fn update_master(pool: &PgPool, old_master: &Master, new_master: &Mast
     Ok(())
 }
 
+/// Verifies the master account with the given username and password
+/// password is the plaintext password
 pub async fn verify_master(pool: &PgPool, username: &String, password: &String) -> anyhow::Result<bool> {
     let stored_master = get_master_by_username(pool, username).await?;
 
@@ -366,16 +381,61 @@ pub async fn verify_master(pool: &PgPool, username: &String, password: &String) 
 }
 
 
+/*
+    Tests ======================================================================
+     ________
+    |__   __|      __      
+      | | ___  ___| |_ ___ 
+      | |/ _ \/ __| __/ __|
+      | |  __/\__ \ |_\__ \
+      |_|\___||___/\__|___/
+    ============================================================================
+*/
+
+
 #[cfg(test)]
 mod tests {
     use sqlx::PgPool;
     use testcontainers::ContainerAsync;
     use testcontainers_modules::{postgres, testcontainers::runners::AsyncRunner};
-    use password_manager_shared::models::Account;
+    use password_manager_shared::{encryption::{decrypt_password, encrypt_password}, models::Account};
     use std::str::FromStr;
 
     use super::*;
 
+    /// Creates a test account
+    /// 
+    /// # Returns
+    /// 
+    /// An `Account` struct with the following fields:
+    /// 
+    /// ```rust
+    /// Account {
+    ///     id: 0,
+    ///     name: "test_account"
+    ///     username: "test_account_username"
+    ///     password: "test_account_password123!!" (but encrypted)
+    ///     url: Some("http://test.com")
+    ///     description: Some("test description")
+    ///     master_id: 1,
+    /// }
+    /// ```
+    fn create_test_account() -> Account {
+        let password = "test_account_password123!!".to_string();
+        // Use the default master password
+        let master_password = "changethis".to_string();
+        let encrypted_password = encrypt_password(&master_password, &password);
+        // Account id is assigned automatically, so 0 is fine
+        Account {
+            id: 0,
+            name: "test_account".to_string(),
+            username: "test_account_username".to_string(),
+            password: encrypted_password,
+            url: Some("http://test.com".to_string()),
+            description: Some("test description".to_string()),
+            master_id: 1,
+        }
+    }
 
     #[tokio::test]
     async fn test_if_testcontainers_modules_works() {
@@ -407,6 +467,17 @@ mod tests {
 
     }
 
+    /// Returns a tuple containing a connection pool and a container
+    /// 
+    /// Initializes with no accounts in the database
+    /// 
+    /// Default master account credentials are:
+    /// 
+    /// * id: 1
+    /// * username: "default"
+    /// * password: "changethis"
+    /// 
+    /// Container is returned so it isn't closed due to going out of scope
     async fn setup_database() -> anyhow::Result<(PgPool, ContainerAsync<testcontainers_modules::postgres::Postgres>)> {
         let node = postgres::Postgres::default().start().await.unwrap();
         println!("Ip address: {}", node.get_bridge_ip_address().await.unwrap());
@@ -426,7 +497,7 @@ mod tests {
         let pool = PgPool::connect_with(options).await.unwrap();
 
         // From initialize_db(), since it creates its own pool
-        // Create tables (normally done with migrations)
+        // Create tables
         sqlx::migrate!().run(&pool).await?;
 
         // Insert the default account only if there are no accounts in the table
@@ -439,6 +510,8 @@ mod tests {
         )
         .execute(&pool)
         .await?; 
+
+        println!("Database setup complete");
 
         // Return the container along with the pool so it isn't dropped
         Ok((pool, node)) 
@@ -496,19 +569,12 @@ mod tests {
         assert!(default_master_exists, "Default master account was not created");
     }
     
+    /// Adds an account to the database and checks if it was added using SQL
     #[tokio::test]
     async fn test_add_account() {
         let (pool, _node) = setup_database().await.unwrap();
 
-        let account = Account {
-            id: 0,
-            name: "test_account".to_string(),
-            username: "test_user".to_string(),
-            password: "test_password".to_string(),
-            url: Some("http://test.com".to_string()),
-            description: Some("test description".to_string()),
-            master_id: 1,
-        };
+        let account = create_test_account();
 
         let result = add_account(&pool, &account).await;
         assert!(result.is_ok());
@@ -531,19 +597,12 @@ mod tests {
         assert!(account_exists, "Account was not added");
     }
 
+    /// Adds an account to the database and checks if it was added using get_account_by_id
     #[tokio::test]
     async fn test_get_account_by_id() {
         let (pool, _node) = setup_database().await.unwrap();
 
-        let account = Account {
-            id: 0,
-            name: "test_account".to_string(),
-            username: "test_user".to_string(),
-            password: "test_password".to_string(),
-            url: Some("http://test.com".to_string()),
-            description: Some("test description".to_string()),
-            master_id: 1,
-        };
+        let account = create_test_account();
 
         add_account(&pool, &account).await.expect("Failed to add account");
 
@@ -554,6 +613,62 @@ mod tests {
         assert_eq!(fetched_account.url, account.url);
         assert_eq!(fetched_account.description, account.description);
         assert_eq!(fetched_account.master_id, account.master_id);
+    }
+
+    /// Adds a master to the database and checks if the plaintext password works with verify_master
+    #[tokio::test]
+    async fn test_verify_master() {
+        let (pool, _node) = setup_database().await.unwrap();
+
+        let username = "test_user".to_string();
+        let password = "test_password".to_string();
+
+        let master = Master {
+            id: 1,
+            username: username.clone(),
+            password: hash_master_password(&password).expect("Error hashing password"),
+        };
+
+        add_master(&pool, &master).await.expect("Failed to add master account");
+
+        let result = verify_master(&pool, &username, &password).await.expect("Failed to verify master account");
+        assert!(result);
+    }
+
+    /// Adds an account to the database, then updates the default master account. 
+    /// Checks if master account was updated and if the account password was re-encrypted
+    #[tokio::test]
+    async fn test_update_master() {
+        let (pool, _node) = setup_database().await.unwrap();
+
+        let account = create_test_account();
+        add_account(&pool, &account).await.expect("Failed to add account");
+
+        let old_master = get_master_by_id(&pool, 1).await.expect("Failed to get master by id");
+
+        let old_master_decrypted = Master {
+            id: old_master.id,
+            username: old_master.username.clone(),
+            password: "changethis".to_string()
+        };
+
+        let new_master = Master {
+            id: 0,
+            username: "new_master_username".to_string(),
+            password: "new_master_password".to_string(),
+        };
+
+        update_master(&pool, &old_master_decrypted, &new_master).await.expect("Failed to update master account");
+
+        let updated_master = get_master_by_id(&pool, old_master.id).await.expect("Failed to get master by id");
+        assert_eq!(updated_master.username, new_master.username);
+
+        assert_eq!(verify_master(&pool, &new_master.username, &new_master.password).await.expect("Failed to verify new master account"), true);
+
+        let updated_account = get_account_by_id(&pool, 1).await.expect("Failed to get account by id");
+        let decrypted_password = decrypt_password(&new_master.password, &updated_account.password).expect("Failed to decrypt password");
+        // Update this value if create_test_account() changes
+        assert_eq!(decrypted_password, "test_account_password123!!");
     }
 
 
