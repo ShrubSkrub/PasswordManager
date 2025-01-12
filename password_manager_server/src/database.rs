@@ -364,3 +364,197 @@ pub async fn verify_master(pool: &PgPool, username: &String, password: &String) 
         Ok(false)
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use sqlx::PgPool;
+    use testcontainers::ContainerAsync;
+    use testcontainers_modules::{postgres, testcontainers::runners::AsyncRunner};
+    use password_manager_shared::models::Account;
+    use std::str::FromStr;
+
+    use super::*;
+
+
+    #[tokio::test]
+    async fn test_if_testcontainers_modules_works() {
+        println!("Starting container");
+        let node = postgres::Postgres::default().start().await.unwrap();
+        println!("Container started");
+        println!("Ip address: {}", node.get_bridge_ip_address().await.unwrap());
+
+        let connection_string = format!(
+            "postgres://{user}:{password}@{host}:{port}/{database}",
+            user = "postgres",
+            password = "postgres",
+            host = node.get_host().await.unwrap(),
+            port = node.get_host_port_ipv4(5432).await.unwrap(),
+            database = "postgres"
+        );
+
+        println!("Connection string: {}", connection_string);
+
+        let options = sqlx::postgres::PgConnectOptions::from_str(&connection_string).unwrap();
+        let pool = PgPool::connect_with(options).await.unwrap();
+
+        let row: (i32,) = sqlx::query_as("SELECT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to execute query");
+
+        assert_eq!(row.0, 1);
+
+    }
+
+    async fn setup_database() -> anyhow::Result<(PgPool, ContainerAsync<testcontainers_modules::postgres::Postgres>)> {
+        let node = postgres::Postgres::default().start().await.unwrap();
+        println!("Ip address: {}", node.get_bridge_ip_address().await.unwrap());
+    
+        let connection_string = format!(
+            "postgres://{user}:{password}@{host}:{port}/{database}",
+            user = "postgres",
+            password = "postgres",
+            host = node.get_host().await.unwrap(),
+            port = node.get_host_port_ipv4(5432).await.unwrap(),
+            database = "postgres"
+        );
+    
+        println!("Connection string: {}", connection_string);
+    
+        let options = sqlx::postgres::PgConnectOptions::from_str(&connection_string).unwrap();
+        let pool = PgPool::connect_with(options).await.unwrap();
+
+        // From initialize_db(), since it creates its own pool
+        // Create tables (normally done with migrations)
+        sqlx::migrate!().run(&pool).await?;
+
+        // Insert the default account only if there are no accounts in the table
+        let default_master_password_hash = hash_master_password(&"changethis".to_string()).expect("Error hashing password!");
+        sqlx::query!(
+            "INSERT INTO masters (username, password)
+            SELECT 'default', $1
+            WHERE NOT EXISTS (SELECT 1 FROM masters)",
+            default_master_password_hash
+        )
+        .execute(&pool)
+        .await?; 
+
+        // Return the container along with the pool so it isn't dropped
+        Ok((pool, node)) 
+    }
+    
+    #[tokio::test]
+    async fn test_setup_database() {
+        let (pool, _node) = setup_database().await.unwrap();
+    
+        // Check if can query the database
+        let row: i32 = sqlx::query_scalar("SELECT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to execute query");
+    
+        assert_eq!(row, 1);
+
+        // Check if the accounts table was created
+        let accounts_table_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_name = 'accounts'
+            )"
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if accounts table exists");
+
+        assert!(accounts_table_exists, "Accounts table was not created");
+
+        // Check if the masters table was created
+        let masters_table_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_name = 'masters'
+            )"
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if masters table exists");
+
+        assert!(masters_table_exists, "Masters table was not created");
+
+        // Check if the default master account was created
+        let default_master_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT 1 FROM masters 
+            WHERE id = 1 AND username = 'default'
+            )"
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if default master account exists");
+
+        assert!(default_master_exists, "Default master account was not created");
+    }
+    
+    #[tokio::test]
+    async fn test_add_account() {
+        let (pool, _node) = setup_database().await.unwrap();
+
+        let account = Account {
+            id: 0,
+            name: "test_account".to_string(),
+            username: "test_user".to_string(),
+            password: "test_password".to_string(),
+            url: Some("http://test.com".to_string()),
+            description: Some("test description".to_string()),
+            master_id: 1,
+        };
+
+        let result = add_account(&pool, &account).await;
+        assert!(result.is_ok());
+
+        // Check if the account was really added
+        let account_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT 1 FROM accounts 
+            WHERE name = $1 AND username = $2 AND password = $3 AND master_id = $4
+            )"
+        )
+        .bind(&account.name)
+        .bind(&account.username)
+        .bind(&account.password)
+        .bind(account.master_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if account exists");
+
+        assert!(account_exists, "Account was not added");
+    }
+
+    #[tokio::test]
+    async fn test_get_account_by_id() {
+        let (pool, _node) = setup_database().await.unwrap();
+
+        let account = Account {
+            id: 0,
+            name: "test_account".to_string(),
+            username: "test_user".to_string(),
+            password: "test_password".to_string(),
+            url: Some("http://test.com".to_string()),
+            description: Some("test description".to_string()),
+            master_id: 1,
+        };
+
+        add_account(&pool, &account).await.expect("Failed to add account");
+
+        let fetched_account = get_account_by_id(&pool, 1).await.expect("Failed to get account by id");
+        assert_eq!(fetched_account.name, account.name);
+        assert_eq!(fetched_account.username, account.username);
+        assert_eq!(fetched_account.password, account.password);
+        assert_eq!(fetched_account.url, account.url);
+        assert_eq!(fetched_account.description, account.description);
+        assert_eq!(fetched_account.master_id, account.master_id);
+    }
+
+
+}
