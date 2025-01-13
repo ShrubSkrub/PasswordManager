@@ -429,6 +429,57 @@ mod tests {
         assert!(account_exists, "Account was not added");
     }
 
+    /// Adds multiple accounts to the database and checks if they were added using SQL
+    #[tokio::test]
+    async fn test_add_multiple_accounts() {
+        let (pool, _node) = setup_database().await.unwrap();
+
+        let account1 = create_test_account();
+        let mut account2 = create_test_account();
+        account2.name = "test_account_2".to_string();
+        account2.username = "test_user_2".to_string();
+
+        let result1 = add_account(&pool, &account1).await;
+        assert!(result1.is_ok());
+
+        let result2 = add_account(&pool, &account2).await;
+        assert!(result2.is_ok());
+
+        // Check if the first account was really added
+        let account1_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT 1 FROM accounts 
+            WHERE name = $1 AND username = $2 AND password = $3 AND master_id = $4
+            )"
+        )
+        .bind(&account1.name)
+        .bind(&account1.username)
+        .bind(&account1.password)
+        .bind(account1.master_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if account1 exists");
+
+        assert!(account1_exists, "Account1 was not added");
+
+        // Check if the second account was really added
+        let account2_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT 1 FROM accounts 
+            WHERE name = $1 AND username = $2 AND password = $3 AND master_id = $4
+            )"
+        )
+        .bind(&account2.name)
+        .bind(&account2.username)
+        .bind(&account2.password)
+        .bind(account2.master_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if account2 exists");
+
+        assert!(account2_exists, "Account2 was not added");
+    }
+
     /// Adds an account to the database and checks if it was added using get_account_by_id
     #[tokio::test]
     async fn test_get_account_by_id() {
