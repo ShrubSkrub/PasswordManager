@@ -191,14 +191,14 @@ mod tests {
         
                 // Create the Actix web application
                 let app = App::new()
-                    .app_data(web::Data::new(pool))
+                    .app_data(web::Data::new(pool.clone()))
                     .configure(config);
         
                 // Initialize the service
                 let app_service = test::init_service(app).await;
 
                 // Return the node so it isn't dropped, which would stop the container
-                (app_service, node)
+                (app_service, pool, node)
 
             }
         }};
@@ -218,9 +218,51 @@ mod tests {
         };
     }
 
+    #[macro_export]
+    macro_rules! post_response_from_route {
+        ($app:expr, $route:expr, $json:expr) => {
+            {
+                let req = TestRequest::post()
+                    .uri($route)
+                    .set_json($json)
+                    .to_request();
+        
+                // Send the request and check the response
+                test::call_service($app, req).await
+            }
+        };
+    }
+    #[macro_export]
+    macro_rules! delete_response_from_route {
+        ($app:expr, $route:expr) => {
+            {
+                let req = TestRequest::delete()
+                    .uri($route)
+                    .to_request();
+        
+                // Send the request and check the response
+                test::call_service($app, req).await
+            }
+        };
+    }
+    #[macro_export]
+    macro_rules! patch_response_from_route {
+        ($app:expr, $route:expr, $json:expr) => {
+            {
+                let req = TestRequest::patch()
+                    .uri($route)
+                    .set_json($json)
+                    .to_request();
+        
+                // Send the request and check the response
+                test::call_service($app, req).await
+            }
+        };
+    }
+
     #[tokio::test]
     async fn test_db_health_check_route() {
-        let (mut app, _node) = create_test_app!().await;
+        let (mut app, _pool, _node) = create_test_app!().await;
 
         let response = get_response_from_route!(&mut app, "/api/db_health");
         
@@ -228,5 +270,77 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = test::read_body(response).await;
         assert_eq!(body, "Database connection is healthy");
+    }
+    #[tokio::test]
+    async fn test_add_account_route() {
+        let (mut app, pool, _node) = create_test_app!().await;
+
+        let account = create_test_account();
+
+        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+
+        // Assert the status code
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Check if the account was really added
+        let account_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT 1 FROM accounts 
+            WHERE name = $1 AND username = $2 AND password = $3 AND master_id = $4
+            )"
+        )
+        .bind(&account.name)
+        .bind(&account.username)
+        .bind(&account.password)
+        .bind(account.master_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if account exists");
+
+        assert!(account_exists, "Account was not added");
+    }
+
+    #[tokio::test]
+    async fn test_delete_account_by_id_route() {
+        let (mut app, pool, _node) = create_test_app!().await;
+
+        // First, add a test account
+        let account = create_test_account();
+        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Get the account ID
+        let account_id: i32 = sqlx::query_scalar(
+            "SELECT id FROM accounts 
+            WHERE name = $1 AND username = $2 AND password = $3 AND master_id = $4"
+        )
+        .bind(&account.name)
+        .bind(&account.username)
+        .bind(&account.password)
+        .bind(account.master_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to get account ID");
+
+        // Delete the account by ID
+        let delete_route = format!("/api/accounts/{}", account_id);
+        let response = delete_response_from_route!(&mut app, &delete_route);
+
+        // Assert the status code
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Check if the account was really deleted
+        let account_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT 1 FROM accounts 
+            WHERE id = $1
+            )"
+        )
+        .bind(account_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if account exists");
+
+        assert!(!account_exists, "Account was not deleted");
     }
 }
