@@ -19,10 +19,11 @@ rand_core = "0.6.4"
 aes-gcm = "0.10.3"
 base64 = "0.22.1"
 sqlx = { version = "0.8.3", features = ["postgres", "chrono", "runtime-tokio", "migrate"] }
-tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
 actix-web = "4.9.0"
 
 [dev-dependencies]
+reqwest = { version = "0.12.12", features = ["json"] }
 testcontainers = "0.23.1"
 testcontainers-modules = { version = "0.11.5", features = ["postgres"] }
 tokio-postgres = "0.7.12"

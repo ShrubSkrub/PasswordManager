@@ -2,14 +2,16 @@ mod database;
 mod compile_config;
 mod routes;
 
-use database::initialize_db;
 use std::process;
 use actix_web::{web, App, HttpServer};
+
+#[cfg(test)]
+pub mod test_functions;
 
 #[tokio::main]
 async fn main() {
     // Initialize the database connection
-    let pool = match initialize_db().await {
+    let pool = match database::initialize_db().await {
         Ok(valid_pool) => valid_pool,
         Err(e) => {
             eprintln!("Failed to connect to database: {}", e);

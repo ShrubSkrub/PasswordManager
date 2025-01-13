@@ -158,3 +158,68 @@ async fn list_master_accounts(pool: web::Data<PgPool>) -> impl Responder {
 async fn update_master(_pool: web::Data<PgPool>, _master: web::Json<Master>) -> impl Responder {
     HttpResponse::NotImplemented().body("Unimplemented!")
 }
+
+/*
+    Tests ======================================================================
+     ________
+    |__   __|      __      
+      | | ___  ___| |_ ___ 
+      | |/ _ \/ __| __/ __|
+      | |  __/\__ \ |_\__ \
+      |_|\___||___/\__|___/
+    ============================================================================
+*/
+
+#[cfg(test)]
+mod tests {
+    use actix_web::http::StatusCode;
+    use actix_web::{web, App};
+    use actix_web::test::{self, TestRequest};
+
+    use super::*;
+    use crate::test_functions::{create_test_account, setup_database};
+
+    /// Creates a test instance Actix web application
+    /// 
+    /// Not an actual http server, but a test instance of the Actix web application
+    #[macro_export]
+    macro_rules! create_test_app {
+        () => {{
+            async {
+                // Set up the database pool
+                let (pool, node) = setup_database().await.unwrap();
+        
+                // Create the Actix web application
+                let app = App::new()
+                    .app_data(web::Data::new(pool))
+                    //.service(db_health_check);
+                    .configure(config);
+        
+                // Initialize and return the service
+                let app_service = test::init_service(app).await;
+
+                (app_service, node)
+
+            }
+        }};
+    }
+
+
+    #[tokio::test]
+    async fn test_db_health_check_route() {
+        let (mut app, _node) = create_test_app!().await;
+
+        let req = TestRequest::get()
+            .uri("/api/db_health")
+            .to_request();
+
+        // Send the request and check the response
+        let response = test::call_service(&mut app, req).await;
+        println!("Response: {:?}", response);
+        
+        // Assert the status code and response body
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = test::read_body(response).await;
+        assert_eq!(body, "Database connection is healthy");
+    }
+}
