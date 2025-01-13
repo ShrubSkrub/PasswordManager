@@ -34,7 +34,7 @@ pub async fn initialize_db() -> anyhow::Result<PgPool> {
 /// Does not encrypt the password, must be encrypted before calling this function
 pub async fn add_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
     // Account id assigned automatically
-    sqlx::query!(
+    match sqlx::query!(
         "INSERT INTO accounts (name, username, password, url, description, master_id) 
         VALUES ($1, $2, $3, $4, $5, $6)",
         account.name,
@@ -45,9 +45,36 @@ pub async fn add_account(pool: &PgPool, account: &Account) -> anyhow::Result<()>
         account.master_id
     )
     .execute(pool)
-    .await?; 
-
-    Ok(())
+    .await
+    {
+        Ok(_) => Ok(()), // Query succeeded
+        Err(err) => {
+            if let sqlx::Error::Database(db_err) = &err {
+                if let Some(constraint) = db_err.constraint() {
+                    // Handle unique constraint violation for name
+                    if constraint == "accounts_name_key" {
+                        return Err(anyhow::anyhow!("Name must be unique"));
+                    }
+                    // Handle foreign key constraint violation for master_id
+                    if constraint == "accounts_master_id_fkey" {
+                        return Err(anyhow::anyhow!("Master ID must exist in the masters table"));
+                    }
+                }
+                // Handle length violations for required fields
+                if db_err.message().contains("violates check constraint") {
+                    if db_err.message().contains("accounts_name") {
+                        return Err(anyhow::anyhow!("Name is required"));
+                    } else if db_err.message().contains("accounts_username") {
+                        return Err(anyhow::anyhow!("Username is required"));
+                    } else if db_err.message().contains("accounts_password") {
+                        return Err(anyhow::anyhow!("Password is required"));
+                    }
+                }
+            }
+            // Propagate other errors
+            Err(err.into())
+        }
+    }
 }
 
 /// Retrieves an account from the database by its id
@@ -480,6 +507,71 @@ mod tests {
         assert!(account2_exists, "Account2 was not added");
     }
 
+    /// Tests the unique constraint violation for name in add_account
+    #[tokio::test]
+    async fn test_add_account_unique_name_violation() {
+        let (pool, _node) = setup_database().await.unwrap();
+
+        let account = create_test_account();
+
+        add_account(&pool, &account).await.expect("Failed to add account");
+
+        let result = add_account(&pool, &account).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Name must be unique");
+    }
+
+    /// Tests the foreign key constraint violation for master_id in add_account
+    #[tokio::test]
+    async fn test_add_account_foreign_key_violation() {
+        let (pool, _node) = setup_database().await.unwrap();
+
+        let mut account = create_test_account();
+        account.master_id = 999; // Non-existent master_id
+
+        let result = add_account(&pool, &account).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Master ID must exist in the masters table");
+    }
+
+    /// Tests the length violation for required fields in add_account
+    #[tokio::test]
+    async fn test_add_account_length_violation() {
+        let (pool, _node) = setup_database().await.unwrap();
+
+        let mut account = create_test_account();
+        account.name = "".to_string(); // Name is required
+
+        let result = add_account(&pool, &account).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Name is required");
+
+        account.name = "test_account".to_string();
+        account.username = "".to_string(); // Username is required
+
+        let result = add_account(&pool, &account).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Username is required");
+
+        account.username = "test_user".to_string();
+        account.password = "".to_string(); // Password is required
+
+        let result = add_account(&pool, &account).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Password is required");
+    }
+
+    /// Tests the invalid type for master_id in add_account
+    #[tokio::test]
+    async fn test_add_account_invalid_master_id_type() {
+        let (pool, _node) = setup_database().await.unwrap();
+
+        let mut account = create_test_account();
+        account.master_id = "invalid".parse().unwrap_or(0); // Invalid master_id type
+
+        let result = add_account(&pool, &account).await;
+        assert!(result.is_err());
+    }
     /// Adds an account to the database and checks if it was added using get_account_by_id
     #[tokio::test]
     async fn test_get_account_by_id() {

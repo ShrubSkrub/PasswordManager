@@ -52,7 +52,7 @@ pub fn create_test_account() -> Account {
 /// Container is returned so it isn't closed due to going out of scope
 pub async fn setup_database() -> anyhow::Result<(PgPool, ContainerAsync<testcontainers_modules::postgres::Postgres>)> {
     let node = postgres::Postgres::default().start().await.unwrap();
-    println!("Ip address: {}", node.get_bridge_ip_address().await.unwrap());
+    // println!("Ip address: {}", node.get_bridge_ip_address().await.unwrap());
 
     let connection_string = format!(
         "postgres://{user}:{password}@{host}:{port}/{database}",
@@ -63,7 +63,7 @@ pub async fn setup_database() -> anyhow::Result<(PgPool, ContainerAsync<testcont
         database = "postgres"
     );
 
-    println!("Connection string: {}", connection_string);
+    // println!("Connection string: {}", connection_string);
 
     let options = sqlx::postgres::PgConnectOptions::from_str(&connection_string).unwrap();
     let pool = PgPool::connect_with(options).await.unwrap();
@@ -83,7 +83,7 @@ pub async fn setup_database() -> anyhow::Result<(PgPool, ContainerAsync<testcont
     .execute(&pool)
     .await?; 
 
-    println!("Database setup complete");
+    // println!("Database setup complete");
 
     // Return the container along with the pool so it isn't dropped
     Ok((pool, node)) 
