@@ -192,30 +192,37 @@ mod tests {
                 // Create the Actix web application
                 let app = App::new()
                     .app_data(web::Data::new(pool))
-                    //.service(db_health_check);
                     .configure(config);
         
-                // Initialize and return the service
+                // Initialize the service
                 let app_service = test::init_service(app).await;
 
+                // Return the node so it isn't dropped, which would stop the container
                 (app_service, node)
 
             }
         }};
     }
 
+    #[macro_export]
+    macro_rules! get_response_from_route {
+        ($app:expr, $route:expr) => {
+            {
+                let req = TestRequest::get()
+                    .uri($route)
+                    .to_request();
+        
+                // Send the request and check the response
+                test::call_service($app, req).await
+            }
+        };
+    }
 
     #[tokio::test]
     async fn test_db_health_check_route() {
         let (mut app, _node) = create_test_app!().await;
 
-        let req = TestRequest::get()
-            .uri("/api/db_health")
-            .to_request();
-
-        // Send the request and check the response
-        let response = test::call_service(&mut app, req).await;
-        println!("Response: {:?}", response);
+        let response = get_response_from_route!(&mut app, "/api/db_health");
         
         // Assert the status code and response body
         assert_eq!(response.status(), StatusCode::OK);
