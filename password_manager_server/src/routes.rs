@@ -175,6 +175,7 @@ mod tests {
     use actix_web::http::StatusCode;
     use actix_web::{web, App};
     use actix_web::test::{self, TestRequest};
+    use password_manager_shared::models::AccountSummary;
 
     use super::*;
     use crate::test_functions::{create_test_account, setup_database};
@@ -393,5 +394,369 @@ mod tests {
         .expect("Failed to check if account2 exists");
 
         assert!(account2_exists, "Account2 was not added");
+    }
+
+    #[tokio::test]
+    async fn test_health_check_route() {
+        let (mut app, _pool, _node) = create_test_app!().await;
+
+        let response = get_response_from_route!(&mut app, "/api/health");
+
+        // Assert the status code and response body
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = test::read_body(response).await;
+        assert_eq!(body, "Server is up");
+    }
+
+    #[tokio::test]
+    async fn test_get_account_by_id_route() {
+        let (mut app, pool, _node) = create_test_app!().await;
+
+        // First, add a test account
+        let account = create_test_account();
+        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Get the account ID
+        let account_id: i32 = sqlx::query_scalar(
+            "SELECT id FROM accounts 
+            WHERE name = $1 AND username = $2 AND password = $3 AND master_id = $4"
+        )
+        .bind(&account.name)
+        .bind(&account.username)
+        .bind(&account.password)
+        .bind(account.master_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to get account ID");
+
+        // Get the account by ID
+        let get_route = format!("/api/accounts/{}", account_id);
+        let response = get_response_from_route!(&mut app, &get_route);
+
+        // Assert the status code and response body
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Account = test::read_body_json(response).await;
+        assert_eq!(body.name, account.name);
+        assert_eq!(body.username, account.username);
+        assert_eq!(body.password, account.password);
+        assert_eq!(body.master_id, account.master_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_account_by_name_route() {
+        let (mut app, _pool, _node) = create_test_app!().await;
+
+        // First, add a test account
+        let account = create_test_account();
+        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Get the account by name
+        let get_route = format!("/api/accounts/name/{}", account.name);
+        let response = get_response_from_route!(&mut app, &get_route);
+
+        // Assert the status code and response body
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Account = test::read_body_json(response).await;
+        assert_eq!(body.name, account.name);
+        assert_eq!(body.username, account.username);
+        assert_eq!(body.password, account.password);
+        assert_eq!(body.master_id, account.master_id);
+    }
+
+    #[tokio::test]
+    async fn test_delete_account_by_name_route() {
+        let (mut app, pool, _node) = create_test_app!().await;
+
+        // First, add a test account
+        let account = create_test_account();
+        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Delete the account by name
+        let delete_route = format!("/api/accounts/name/{}", account.name);
+        let response = delete_response_from_route!(&mut app, &delete_route);
+
+        // Assert the status code
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Check if the account was really deleted
+        let account_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT 1 FROM accounts 
+            WHERE name = $1
+            )"
+        )
+        .bind(&account.name)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if account exists");
+
+        assert!(!account_exists, "Account was not deleted");
+    }
+
+    #[tokio::test]
+    async fn test_list_accounts_route() {
+        let (mut app, _pool, _node) = create_test_app!().await;
+
+        // Add a test account
+        let account = create_test_account();
+        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // List accounts
+        let response = get_response_from_route!(&mut app, "/api/accounts");
+
+        // Assert the status code and response body
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Vec<AccountSummary> = test::read_body_json(response).await;
+        assert!(!body.is_empty(), "No accounts found");
+    }
+
+    #[tokio::test]
+    async fn test_search_accounts_route() {
+        let (mut app, _pool, _node) = create_test_app!().await;
+
+        // Add a test account
+        let account = create_test_account();
+        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Search accounts
+        let search_term = "test";
+        let search_route = format!("/api/accounts/search/{}", search_term);
+        let response = get_response_from_route!(&mut app, &search_route);
+
+        // Assert the status code and response body
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Vec<AccountSummary> = test::read_body_json(response).await;
+        assert!(!body.is_empty(), "No accounts found");
+    }
+
+    #[tokio::test]
+    async fn test_update_account_route() {
+        let (mut app, pool, _node) = create_test_app!().await;
+
+        // Add a test account
+        let mut account = create_test_account();
+        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Update the account
+        account.username = "updated_user".to_string();
+        account.id = 1;
+        let response = patch_response_from_route!(&mut app, "/api/accounts", &account);
+
+        // Assert the status code
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Check if the account was really updated
+        let updated_account: Account = sqlx::query_as!(Account,
+            "SELECT * FROM accounts 
+            WHERE name = $1 AND username = $2 AND password = $3 AND master_id = $4",
+            account.name,
+            account.username,
+            account.password,
+            account.master_id
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to get updated account");
+
+        assert_eq!(updated_account.username, "updated_user");
+    }
+
+    #[tokio::test]
+    async fn test_add_master_route() {
+        let (mut app, pool, _node) = create_test_app!().await;
+
+        let master = Master {
+            id: 0,
+            username: "test_master".to_string(),
+            password: "test_password".to_string(),
+        };
+
+        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+
+        // Assert the status code
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Check if the master was really added
+        let master_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT 1 FROM masters 
+            WHERE username = $1 AND password = $2
+            )"
+        )
+        .bind(&master.username)
+        .bind(&master.password)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if master exists");
+
+        assert!(master_exists, "Master was not added");
+    }
+
+    #[tokio::test]
+    async fn test_get_master_by_id_route() {
+        let (mut app, pool, _node) = create_test_app!().await;
+
+        // First, add a test master
+        let master = Master {
+            id: 0,
+            username: "test_master".to_string(),
+            password: "test_password".to_string(),
+        };
+        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Get the master ID
+        let master_id: i32 = sqlx::query_scalar(
+            "SELECT id FROM masters 
+            WHERE username = $1 AND password = $2"
+        )
+        .bind(&master.username)
+        .bind(&master.password)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to get master ID");
+
+        // Get the master by ID
+        let get_route = format!("/api/masters/{}", master_id);
+        let response = get_response_from_route!(&mut app, &get_route);
+
+        // Assert the status code and response body
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Master = test::read_body_json(response).await;
+        assert_eq!(body.username, master.username);
+        assert_eq!(body.password, master.password);
+    }
+
+    #[tokio::test]
+    async fn test_get_master_by_username_route() {
+        let (mut app, _pool, _node) = create_test_app!().await;
+
+        // First, add a test master
+        let master = Master {
+            id: 0,
+            username: "test_master".to_string(),
+            password: "test_password".to_string(),
+        };
+        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Get the master by username
+        let get_route = format!("/api/masters/username/{}", master.username);
+        let response = get_response_from_route!(&mut app, &get_route);
+
+        // Assert the status code and response body
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Master = test::read_body_json(response).await;
+        assert_eq!(body.username, master.username);
+        assert_eq!(body.password, master.password);
+    }
+
+    #[tokio::test]
+    async fn test_delete_master_by_id_route() {
+        let (mut app, pool, _node) = create_test_app!().await;
+
+        // First, add a test master
+        let master = Master {
+            id: 0,
+            username: "test_master".to_string(),
+            password: "test_password".to_string(),
+        };
+        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Get the master ID
+        let master_id: i32 = sqlx::query_scalar(
+            "SELECT id FROM masters 
+            WHERE username = $1 AND password = $2"
+        )
+        .bind(&master.username)
+        .bind(&master.password)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to get master ID");
+
+        // Delete the master by ID
+        let delete_route = format!("/api/masters/{}", master_id);
+        let response = delete_response_from_route!(&mut app, &delete_route);
+
+        // Assert the status code
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Check if the master was really deleted
+        let master_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT 1 FROM masters 
+            WHERE id = $1
+            )"
+        )
+        .bind(master_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if master exists");
+
+        assert!(!master_exists, "Master was not deleted");
+    }
+
+    #[tokio::test]
+    async fn test_delete_master_by_username_route() {
+        let (mut app, pool, _node) = create_test_app!().await;
+
+        // First, add a test master
+        let master = Master {
+            id: 0,
+            username: "test_master".to_string(),
+            password: "test_password".to_string(),
+        };
+        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Delete the master by username
+        let delete_route = format!("/api/masters/username/{}", master.username);
+        let response = delete_response_from_route!(&mut app, &delete_route);
+
+        // Assert the status code
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Check if the master was really deleted
+        let master_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+            SELECT 1 FROM masters 
+            WHERE username = $1
+            )"
+        )
+        .bind(&master.username)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to check if master exists");
+
+        assert!(!master_exists, "Master was not deleted");
+    }
+
+    #[tokio::test]
+    async fn test_list_master_accounts_route() {
+        let (mut app, _pool, _node) = create_test_app!().await;
+
+        // Add a test master
+        let master = Master {
+            id: 0,
+            username: "test_master".to_string(),
+            password: "test_password".to_string(),
+        };
+        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // List masters
+        let response = get_response_from_route!(&mut app, "/api/masters");
+
+        // Assert the status code and response body
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Vec<Master> = test::read_body_json(response).await;
+        assert!(!body.is_empty(), "No masters found");
     }
 }

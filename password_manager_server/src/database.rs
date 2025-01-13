@@ -191,6 +191,7 @@ pub async fn search_accounts(pool: &PgPool, search_term: &String) -> anyhow::Res
     Ok(summaries)
 }
 
+/// Updates the account with the given id to the values of the given account
 pub async fn update_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
     let query_result = sqlx::query!(
         "UPDATE accounts 
