@@ -77,9 +77,9 @@ pub async fn add_account(pool: &PgPool, account: &Account) -> anyhow::Result<()>
     }
 }
 
-/// Retrieves an account from the database by its id
+/// Returns an [`Account`] from the database by its id
 ///
-/// password returned is base64 encoded and encrypted, must be decoded before use
+/// Password is base64 encoded and encrypted, must be decoded before use
 pub async fn get_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Account> {
     let account = sqlx::query_as!(Account,
         "SELECT id, name, username, password, url, description, master_id
@@ -92,6 +92,9 @@ pub async fn get_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Account
     Ok(account)
 }
 
+/// Returns an [`Account`] from the database by its name
+/// 
+/// Password is base64 encoded and encrypted, must be decoded before use
 pub async fn get_account_by_name(pool: &PgPool, name: &String) -> anyhow::Result<Account> {
     let row = sqlx::query!(
         "SELECT id, name, username, password, url, description, master_id
@@ -166,7 +169,10 @@ pub async fn delete_account_by_name(pool: &PgPool, name: &String) -> anyhow::Res
     }
 }
 
-// TODO Add a function for pagination
+/// Returns a list of all accounts in the form of 
+/// [`AccountSummary`] from the database
+/// 
+/// TODO Add a function for pagination
 pub async fn list_accounts(pool: &PgPool) -> anyhow::Result<Vec<AccountSummary>> {
     // List all account ids, names, and descriptions from the database
     let summaries = sqlx::query_as!(AccountSummary,
@@ -178,6 +184,10 @@ pub async fn list_accounts(pool: &PgPool) -> anyhow::Result<Vec<AccountSummary>>
     Ok(summaries)
 }
 
+/// Returns a list of all accounts in the form of 
+/// [`AccountSummary`] from the database
+/// 
+/// TODO Add a function for pagination
 pub async fn search_accounts(pool: &PgPool, search_term: &String) -> anyhow::Result<Vec<AccountSummary>> {
     let summaries = sqlx::query_as!(AccountSummary,
         "SELECT id, name, description 
@@ -191,7 +201,9 @@ pub async fn search_accounts(pool: &PgPool, search_term: &String) -> anyhow::Res
     Ok(summaries)
 }
 
-/// Updates the account with the given id to the values of the given account
+/// Updates an account with the given id to the values of the given [`Account`]
+/// 
+/// Returns an error if the UPDATE query fails
 pub async fn update_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
     let query_result = sqlx::query!(
         "UPDATE accounts 
@@ -215,6 +227,9 @@ pub async fn update_account(pool: &PgPool, account: &Account) -> anyhow::Result<
     Ok(())
 }
 
+/// Helper function for [`update_master`]
+/// 
+/// Reads each input [`ids_and_passwords`] tuple and updates the password for the account with the given id
 async fn update_accounts_passwords(pool: &PgPool, ids_and_passwords: &Vec<(i32, String)>) -> anyhow::Result<()> {
     let mut query = String::from("UPDATE accounts SET password = CASE id ");
     let mut ids = Vec::new();
@@ -245,6 +260,10 @@ async fn update_accounts_passwords(pool: &PgPool, ids_and_passwords: &Vec<(i32, 
 
 // ----------------------------------------------------------------------------
 // Masters --------------------------------------------------------------------
+
+/// Adds a [`Master`] account to the database
+///
+/// Does not hash the password, must be hashed before calling this function
 pub async fn add_master(pool: &PgPool, master: &Master) -> anyhow::Result<()> {
     // Master id assigned automatically
     sqlx::query!(
@@ -258,6 +277,10 @@ pub async fn add_master(pool: &PgPool, master: &Master) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Returns a [`Master`] account from the database by its id
+/// 
+/// Password is hashed
 pub async fn get_master_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Master> {
     let master = sqlx::query_as!(Master,
         "SELECT id, username, password
@@ -270,6 +293,9 @@ pub async fn get_master_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Master> 
     Ok(master)
 }
 
+/// Returns a [`Master`] account from the database by its username
+/// 
+/// Password is hashed
 pub async fn get_master_by_username(pool: &PgPool, username: &String) -> anyhow::Result<Master> {
     let master = sqlx::query_as!(Master,
         "SELECT id, username, password
@@ -282,6 +308,9 @@ pub async fn get_master_by_username(pool: &PgPool, username: &String) -> anyhow:
     Ok(master)
 }
 
+/// Deletes a master account by its id
+/// 
+/// Returns an error if the DELETE query fails
 pub async fn delete_master_by_id(pool: &PgPool, id: i32) -> anyhow::Result<()> {
     match get_master_by_id(pool, id).await {
         Ok(returned_master) => {
@@ -307,6 +336,9 @@ pub async fn delete_master_by_id(pool: &PgPool, id: i32) -> anyhow::Result<()> {
     }
 }
 
+/// Deletes a master account by its username
+/// 
+/// Returns an error if the DELETE query fails
 pub async fn delete_master_by_username(pool: &PgPool, username: &String) -> anyhow::Result<()> {
     match get_master_by_username(pool, username).await {
         Ok(returned_master) => {
@@ -332,7 +364,12 @@ pub async fn delete_master_by_username(pool: &PgPool, username: &String) -> anyh
     }
 }
 
-// TODO Don't return password? Maybe make another struct
+/// Returns a list of all master accounts in the form of
+/// [`Master`] from the database
+/// 
+/// Passwords are hashed
+/// 
+/// TODO Add a function for pagination
 pub async fn list_master_accounts(pool: &PgPool) -> anyhow::Result<Vec<Master>> {
     let summaries = sqlx::query_as!(Master,
         "SELECT id, username, password FROM masters"
@@ -344,11 +381,11 @@ pub async fn list_master_accounts(pool: &PgPool) -> anyhow::Result<Vec<Master>> 
 }
 
 
-/// Updates the master account with the given id of old_master to the values of new_master
+/// Updates the master account with the given id of [`old_master`] to the values of [`new_master`]
 /// 
-/// Updates all accounts associated with the old master account to use the new master account's password
+/// Updates all accounts associated with [`old_master`].id to use [`new_master`].password
 /// 
-/// old_master.password and new_master.password should be plaintext
+/// [`old_master`].password and [`new_master`].password must be **plaintext**
 ///
 /// Returns an error if the UPDATE query fails or if the re-encryption of the account passwords fails
 pub async fn update_master(pool: &PgPool, old_master: &Master, new_master: &Master) -> anyhow::Result<()> {
@@ -396,6 +433,7 @@ pub async fn update_master(pool: &PgPool, old_master: &Master, new_master: &Mast
 }
 
 /// Verifies the master account with the given username and password
+/// 
 /// password is the plaintext password
 pub async fn verify_master(pool: &PgPool, username: &String, password: &String) -> anyhow::Result<bool> {
     let stored_master = get_master_by_username(pool, username).await?;
