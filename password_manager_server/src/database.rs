@@ -445,6 +445,20 @@ pub async fn verify_master(pool: &PgPool, username: &String, password: &String) 
     }
 }
 
+/// Verifies the master account with the given username and password
+/// and returns the master account id if successful
+/// 
+/// password is the plaintext password
+pub async fn verify_master_and_get_id(pool: &PgPool, username: &String, password: &String) -> anyhow::Result<i32> {
+    let stored_master = get_master_by_username(pool, username).await?;
+
+    if verify_master_password(&stored_master.password, &password){
+        Ok(stored_master.id)
+    } else {
+        Err(anyhow::anyhow!("Failed to verify master account"))
+    }
+}
+
 
 /*
     Tests ======================================================================

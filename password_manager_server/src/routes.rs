@@ -1,11 +1,26 @@
 use actix_web::{web, HttpResponse, Responder, get, post, delete, patch};
 use sqlx::PgPool;
-use password_manager_shared::models::{Account, Master};
+use jsonwebtoken::{Header, EncodingKey};
+
+use password_manager_shared::models::{Account, Master, LoginResponse, Claims};
 use crate::database;
 
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(
+        web::scope("/api/status")
+            // Health check routes
+            .service(health_check)
+            .service(db_health_check)
+    );
+    cfg.service(
+        web::scope("/api/auth")
+            // Health check routes
+            .service(get_jwt_token)
+    );
+    cfg.service(
         web::scope("/api")
+            // Require master authentication for all routes in this scope
+            .wrap(actix_web::middleware::from_fn(crate::middleware::auth_master))
             // Accounts routes
             .service(add_account)
             .service(get_account_by_id)
@@ -23,9 +38,6 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             .service(delete_master_by_username)
             .service(list_master_accounts)
             .service(update_master)
-            // Health check routes
-            .service(health_check)
-            .service(db_health_check)
     );
 }
 
@@ -39,6 +51,46 @@ async fn db_health_check(pool: web::Data<PgPool>) -> impl Responder {
     match sqlx::query("SELECT 1").execute(pool.get_ref()).await {
         Ok(_) => HttpResponse::Ok().body("Database connection is healthy"),
         Err(_) => HttpResponse::InternalServerError().body("Failed to connect to the database"),
+    }
+}
+
+
+#[get("/token")]
+async fn get_jwt_token(req: actix_web::HttpRequest, pool: web::Data<PgPool>) -> impl Responder {
+    let username = req.headers().get("Username").and_then(|v| v.to_str().ok());
+    let password = req.headers().get("Password").and_then(|v| v.to_str().ok());
+
+    // Check if username and password are provided
+    if let (Some(username), Some(password)) = (username, password) {
+        match database::verify_master_and_get_id(&pool, &username.to_string(), &password.to_string()).await {
+            Ok(master_id) => {
+                // Create claims for the JWT
+                let claims = Claims {
+                    sub: master_id.to_string(),
+                    exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize, // token expires in 1 hour
+                };
+
+                // Encode the claims into a JWT
+                // TODO Change the secret key to use AWS Secrets Manager
+                // TODO Update to RSA key pair for DecodingKey
+                let encoding_key = EncodingKey::from_secret("temporary_secret_key".as_ref());
+                match jsonwebtoken::encode(&Header::default(), &claims, &encoding_key) {
+                    Ok(token) => {
+                        // Return the JWT token in the response
+                        let response = LoginResponse { token };
+                        return HttpResponse::Ok().json(response);
+                    }
+                    Err(_) => {
+                        return HttpResponse::InternalServerError().body("Failed to generate token");
+                    }
+                }
+            }
+            Err(_) => {
+                HttpResponse::Unauthorized().body("Invalid credentials")
+            }
+        }
+    } else {
+        HttpResponse::Unauthorized().body("Missing username or password")
     }
 }
 
@@ -205,12 +257,16 @@ mod tests {
         }};
     }
 
+    // TODO Consolidate into one overloaded macro that takes route
+    // Also add option for custom headers
     #[macro_export]
     macro_rules! get_response_from_route {
         ($app:expr, $route:expr) => {
             {
                 let req = TestRequest::get()
                     .uri($route)
+                    .append_header(("Username", "default"))
+                    .append_header(("Password", "changethis"))
                     .to_request();
         
                 // Send the request and check the response
@@ -226,6 +282,8 @@ mod tests {
                 let req = TestRequest::post()
                     .uri($route)
                     .set_json($json)
+                    .append_header(("Username", "default"))
+                    .append_header(("Password", "changethis"))
                     .to_request();
         
                 // Send the request and check the response
@@ -239,6 +297,8 @@ mod tests {
             {
                 let req = TestRequest::delete()
                     .uri($route)
+                    .append_header(("Username", "default"))
+                    .append_header(("Password", "changethis"))
                     .to_request();
         
                 // Send the request and check the response
@@ -253,6 +313,8 @@ mod tests {
                 let req = TestRequest::patch()
                     .uri($route)
                     .set_json($json)
+                    .append_header(("Username", "default"))
+                    .append_header(("Password", "changethis"))
                     .to_request();
         
                 // Send the request and check the response
@@ -265,13 +327,48 @@ mod tests {
     async fn test_db_health_check_route() {
         let (mut app, _pool, _node) = create_test_app!().await;
 
-        let response = get_response_from_route!(&mut app, "/api/db_health");
+        let response = get_response_from_route!(&mut app, "/api/status/db_health");
         
         // Assert the status code and response body
         assert_eq!(response.status(), StatusCode::OK);
         let body = test::read_body(response).await;
         assert_eq!(body, "Database connection is healthy");
     }
+
+    #[tokio::test]
+    async fn test_health_check_route() {
+        let (mut app, _pool, _node) = create_test_app!().await;
+
+        let response = get_response_from_route!(&mut app, "/api/status/health");
+
+        // Assert the status code and response body
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = test::read_body(response).await;
+        assert_eq!(body, "Server is up");
+    }
+
+    #[tokio::test]
+    async fn test_jwt_token_route() {
+        let (mut app, _pool, _node) = create_test_app!().await;
+
+        let response = get_response_from_route!(&mut app, "/api/auth/token");
+
+        // Assert the status code
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Check if the token was really generated
+        let body: LoginResponse = test::read_body_json(response).await;
+        assert!(!body.token.is_empty(), "Token was not generated");
+
+        println!("Token: {}", body.token);
+        // TODO Update to RSA key pair for DecodingKey
+        let token_message = jsonwebtoken::decode::<Claims>(&body.token, &jsonwebtoken::DecodingKey::from_secret("temporary_secret_key".as_ref()), &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256)).expect("Failed to decode the JWT token");
+        println!("Token Claims Sub: {}", token_message.claims.sub);
+        assert_eq!(token_message.claims.sub, "1");
+
+        // TODO Test another master for different id
+    }
+
     #[tokio::test]
     async fn test_add_account_route() {
         let (mut app, pool, _node) = create_test_app!().await;
@@ -394,18 +491,6 @@ mod tests {
         .expect("Failed to check if account2 exists");
 
         assert!(account2_exists, "Account2 was not added");
-    }
-
-    #[tokio::test]
-    async fn test_health_check_route() {
-        let (mut app, _pool, _node) = create_test_app!().await;
-
-        let response = get_response_from_route!(&mut app, "/api/health");
-
-        // Assert the status code and response body
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = test::read_body(response).await;
-        assert_eq!(body, "Server is up");
     }
 
     #[tokio::test]

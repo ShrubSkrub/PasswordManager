@@ -1,6 +1,7 @@
 mod database;
 mod compile_config;
 mod routes;
+mod middleware;
 
 use std::process;
 use actix_web::{web, App, HttpServer};

@@ -58,3 +58,26 @@ impl Drop for Master {
         self.password.zeroize();
     }
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+impl Drop for LoginRequest {
+    fn drop(&mut self) {
+        self.username.zeroize();
+        self.password.zeroize();
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoginResponse {
+    pub token: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Claims {
+    pub sub: String,
+    pub exp: usize,
+}

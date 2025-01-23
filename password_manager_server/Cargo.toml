@@ -21,6 +21,14 @@ base64 = "0.22.1"
 sqlx = { version = "0.8.3", features = ["postgres", "chrono", "runtime-tokio", "migrate"] }
 tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
 actix-web = "4.9.0"
+actix-jwt-auth-middleware = "0.5.0"
+jsonwebtoken = "9.3.0"
+ed25519-compact = "2.1.1"
+jwt-compact = { version = "0.8.0", features = ["ed25519-dalek"] }
+ed25519-dalek = "2.1.1"
+actix-service = "2.0.2"
+futures = "0.3.31"
+chrono = "0.4.39"
 
 [dev-dependencies]
 reqwest = { version = "0.12.12", features = ["json"] }
