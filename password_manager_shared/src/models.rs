@@ -78,6 +78,6 @@ pub struct LoginResponse {
 
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String,
+    pub id: String,
     pub exp: usize,
 }

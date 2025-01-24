@@ -66,7 +66,7 @@ async fn get_jwt_token(req: actix_web::HttpRequest, pool: web::Data<PgPool>) -> 
             Ok(master_id) => {
                 // Create claims for the JWT
                 let claims = Claims {
-                    sub: master_id.to_string(),
+                    id: master_id.to_string(),
                     exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize, // token expires in 1 hour
                 };
 
@@ -257,10 +257,11 @@ mod tests {
         }};
     }
 
-    // TODO Consolidate into one overloaded macro that takes route
-    // Also add option for custom headers
+    /// For getting JWT token for master
+    /// 
+    /// If no username and password are provided, default master credentials are used
     #[macro_export]
-    macro_rules! get_response_from_route {
+    macro_rules! get_jwt_token_from_route {
         ($app:expr, $route:expr) => {
             {
                 let req = TestRequest::get()
@@ -270,11 +271,69 @@ mod tests {
                     .to_request();
         
                 // Send the request and check the response
+                let response = test::call_service($app, req).await;
+                let body: LoginResponse = test::read_body_json(response).await;
+                body.token
+            }
+        };
+        ($app:expr, $route:expr, $username:expr, $password:expr) => {
+            {
+                let req = TestRequest::get()
+                    .uri($route)
+                    .append_header(("Username", $username))
+                    .append_header(("Password", $password))
+                    .to_request();
+        
+                // Send the request and check the response
+                test::call_service($app, req).await
+                let body: LoginResponse = test::read_body_json(response).await;
+                body.token
+            }
+        };
+    }
+
+    #[macro_export]
+    macro_rules! response_from_route {
+        ($type:ident, $app:expr, $route:expr, $token:expr) => {
+            {
+                let req = TestRequest::$type()
+                    .uri($route)
+                    .append_header(("Authorization", format!("Bearer {}", $token)))
+                    .to_request();
+        
+                // Send the request and check the response
+                test::call_service($app, req).await
+            }
+        };
+        ($type:ident, $app:expr, $route:expr, $token:expr, $json:expr) => {
+            {
+                let req = TestRequest::$type()
+                    .uri($route)
+                    .append_header(("Authorization", format!("Bearer {}", $token)))
+                    .set_json($json)
+                    .to_request();
+        
+                // Send the request and check the response
                 test::call_service($app, req).await
             }
         };
     }
 
+    #[macro_export]
+    macro_rules! get_response_from_route {
+        ($app:expr, $route:expr) => {
+            {
+                let req = TestRequest::get()
+                    .uri($route)
+                    .to_request();
+        
+                // Send the request and check the response
+                test::call_service($app, req).await
+            }
+        };
+    }
+
+    /// Legacy macro
     #[macro_export]
     macro_rules! post_response_from_route {
         ($app:expr, $route:expr, $json:expr) => {
@@ -282,8 +341,6 @@ mod tests {
                 let req = TestRequest::post()
                     .uri($route)
                     .set_json($json)
-                    .append_header(("Username", "default"))
-                    .append_header(("Password", "changethis"))
                     .to_request();
         
                 // Send the request and check the response
@@ -291,14 +348,14 @@ mod tests {
             }
         };
     }
+
+    /// Legacy macro
     #[macro_export]
     macro_rules! delete_response_from_route {
         ($app:expr, $route:expr) => {
             {
                 let req = TestRequest::delete()
                     .uri($route)
-                    .append_header(("Username", "default"))
-                    .append_header(("Password", "changethis"))
                     .to_request();
         
                 // Send the request and check the response
@@ -306,6 +363,8 @@ mod tests {
             }
         };
     }
+
+    /// Legacy macro
     #[macro_export]
     macro_rules! patch_response_from_route {
         ($app:expr, $route:expr, $json:expr) => {
@@ -313,8 +372,6 @@ mod tests {
                 let req = TestRequest::patch()
                     .uri($route)
                     .set_json($json)
-                    .append_header(("Username", "default"))
-                    .append_header(("Password", "changethis"))
                     .to_request();
         
                 // Send the request and check the response
@@ -348,23 +405,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_jwt_token_route() {
+    async fn test_jwt_route() {
         let (mut app, _pool, _node) = create_test_app!().await;
 
-        let response = get_response_from_route!(&mut app, "/api/auth/token");
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
-        // Assert the status code
-        assert_eq!(response.status(), StatusCode::OK);
+        println!("Token: {}", token);
 
-        // Check if the token was really generated
-        let body: LoginResponse = test::read_body_json(response).await;
-        assert!(!body.token.is_empty(), "Token was not generated");
-
-        println!("Token: {}", body.token);
         // TODO Update to RSA key pair for DecodingKey
-        let token_message = jsonwebtoken::decode::<Claims>(&body.token, &jsonwebtoken::DecodingKey::from_secret("temporary_secret_key".as_ref()), &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256)).expect("Failed to decode the JWT token");
-        println!("Token Claims Sub: {}", token_message.claims.sub);
-        assert_eq!(token_message.claims.sub, "1");
+        let token_message = jsonwebtoken::decode::<Claims>(&token, &jsonwebtoken::DecodingKey::from_secret("temporary_secret_key".as_ref()), &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256)).expect("Failed to decode the JWT token");
+        println!("Token Claims id: {}", token_message.claims.id);
+        assert_eq!(token_message.claims.id, "1");
 
         // TODO Test another master for different id
     }
@@ -372,10 +423,11 @@ mod tests {
     #[tokio::test]
     async fn test_add_account_route() {
         let (mut app, pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         let account = create_test_account();
 
-        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        let response = response_from_route!(post, &mut app, "/api/accounts", token, &account);
 
         // Assert the status code
         assert_eq!(response.status(), StatusCode::OK);
@@ -401,10 +453,11 @@ mod tests {
     #[tokio::test]
     async fn test_delete_account_by_id_route() {
         let (mut app, pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // First, add a test account
         let account = create_test_account();
-        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        let response = response_from_route!(post, &mut app, "/api/accounts", token, &account);
         assert_eq!(response.status(), StatusCode::OK);
 
         // Get the account ID
@@ -422,7 +475,7 @@ mod tests {
 
         // Delete the account by ID
         let delete_route = format!("/api/accounts/{}", account_id);
-        let response = delete_response_from_route!(&mut app, &delete_route);
+        let response = response_from_route!(delete, &mut app, &delete_route, token);
 
         // Assert the status code
         assert_eq!(response.status(), StatusCode::OK);
@@ -445,14 +498,15 @@ mod tests {
     #[tokio::test]
     async fn test_add_multiple_accounts_route() {
         let (mut app, pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         let account1 = create_test_account();
         let mut account2 = create_test_account();
         account2.name = "test_account_2".to_string();
         account2.username = "test_user_2".to_string();
 
-        let response1 = post_response_from_route!(&mut app, "/api/accounts", &account1);
-        let response2 = post_response_from_route!(&mut app, "/api/accounts", &account2);
+        let response1 = response_from_route!(post, &mut app, "/api/accounts", token, &account1);
+        let response2 = response_from_route!(post, &mut app, "/api/accounts", token, &account2);
 
         // Assert the status codes
         assert_eq!(response1.status(), StatusCode::OK);
@@ -496,10 +550,11 @@ mod tests {
     #[tokio::test]
     async fn test_get_account_by_id_route() {
         let (mut app, pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // First, add a test account
         let account = create_test_account();
-        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        let response = response_from_route!(post, &mut app, "/api/accounts", token, &account);
         assert_eq!(response.status(), StatusCode::OK);
 
         // Get the account ID
@@ -517,7 +572,7 @@ mod tests {
 
         // Get the account by ID
         let get_route = format!("/api/accounts/{}", account_id);
-        let response = get_response_from_route!(&mut app, &get_route);
+        let response = response_from_route!(get, &mut app, &get_route, token);
 
         // Assert the status code and response body
         assert_eq!(response.status(), StatusCode::OK);
@@ -531,15 +586,16 @@ mod tests {
     #[tokio::test]
     async fn test_get_account_by_name_route() {
         let (mut app, _pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // First, add a test account
         let account = create_test_account();
-        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        let response = response_from_route!(post, &mut app, "/api/accounts", token, &account);
         assert_eq!(response.status(), StatusCode::OK);
 
         // Get the account by name
         let get_route = format!("/api/accounts/name/{}", account.name);
-        let response = get_response_from_route!(&mut app, &get_route);
+        let response = response_from_route!(get, &mut app, &get_route, token);
 
         // Assert the status code and response body
         assert_eq!(response.status(), StatusCode::OK);
@@ -553,15 +609,16 @@ mod tests {
     #[tokio::test]
     async fn test_delete_account_by_name_route() {
         let (mut app, pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // First, add a test account
         let account = create_test_account();
-        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        let response = response_from_route!(post, &mut app, "/api/accounts", token, &account);
         assert_eq!(response.status(), StatusCode::OK);
 
         // Delete the account by name
         let delete_route = format!("/api/accounts/name/{}", account.name);
-        let response = delete_response_from_route!(&mut app, &delete_route);
+        let response = response_from_route!(delete, &mut app, &delete_route, token);
 
         // Assert the status code
         assert_eq!(response.status(), StatusCode::OK);
@@ -584,14 +641,15 @@ mod tests {
     #[tokio::test]
     async fn test_list_accounts_route() {
         let (mut app, _pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // Add a test account
         let account = create_test_account();
-        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        let response = response_from_route!(post, &mut app, "/api/accounts", token, &account);
         assert_eq!(response.status(), StatusCode::OK);
 
         // List accounts
-        let response = get_response_from_route!(&mut app, "/api/accounts");
+        let response = response_from_route!(get, &mut app, "/api/accounts", token);
 
         // Assert the status code and response body
         assert_eq!(response.status(), StatusCode::OK);
@@ -602,16 +660,17 @@ mod tests {
     #[tokio::test]
     async fn test_search_accounts_route() {
         let (mut app, _pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // Add a test account
         let account = create_test_account();
-        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        let response = response_from_route!(post, &mut app, "/api/accounts", token, &account);
         assert_eq!(response.status(), StatusCode::OK);
 
         // Search accounts
         let search_term = "test";
         let search_route = format!("/api/accounts/search/{}", search_term);
-        let response = get_response_from_route!(&mut app, &search_route);
+        let response = response_from_route!(get, &mut app, &search_route, token);
 
         // Assert the status code and response body
         assert_eq!(response.status(), StatusCode::OK);
@@ -622,16 +681,17 @@ mod tests {
     #[tokio::test]
     async fn test_update_account_route() {
         let (mut app, pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // Add a test account
         let mut account = create_test_account();
-        let response = post_response_from_route!(&mut app, "/api/accounts", &account);
+        let response = response_from_route!(post, &mut app, "/api/accounts", token, &account);
         assert_eq!(response.status(), StatusCode::OK);
 
         // Update the account
         account.username = "updated_user".to_string();
         account.id = 1;
-        let response = patch_response_from_route!(&mut app, "/api/accounts", &account);
+        let response = response_from_route!(patch, &mut app, "/api/accounts", token, &account);
 
         // Assert the status code
         assert_eq!(response.status(), StatusCode::OK);
@@ -655,6 +715,7 @@ mod tests {
     #[tokio::test]
     async fn test_add_master_route() {
         let (mut app, pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         let master = Master {
             id: 0,
@@ -662,7 +723,7 @@ mod tests {
             password: "test_password".to_string(),
         };
 
-        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        let response = response_from_route!(post, &mut app, "/api/masters", token, &master);
 
         // Assert the status code
         assert_eq!(response.status(), StatusCode::OK);
@@ -686,6 +747,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_master_by_id_route() {
         let (mut app, pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // First, add a test master
         let master = Master {
@@ -693,7 +755,7 @@ mod tests {
             username: "test_master".to_string(),
             password: "test_password".to_string(),
         };
-        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        let response = response_from_route!(post, &mut app, "/api/masters", token, &master);
         assert_eq!(response.status(), StatusCode::OK);
 
         // Get the master ID
@@ -709,7 +771,7 @@ mod tests {
 
         // Get the master by ID
         let get_route = format!("/api/masters/{}", master_id);
-        let response = get_response_from_route!(&mut app, &get_route);
+        let response = response_from_route!(get, &mut app, &get_route, token);
 
         // Assert the status code and response body
         assert_eq!(response.status(), StatusCode::OK);
@@ -721,6 +783,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_master_by_username_route() {
         let (mut app, _pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // First, add a test master
         let master = Master {
@@ -728,12 +791,12 @@ mod tests {
             username: "test_master".to_string(),
             password: "test_password".to_string(),
         };
-        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        let response = response_from_route!(post, &mut app, "/api/masters", token, &master);
         assert_eq!(response.status(), StatusCode::OK);
 
         // Get the master by username
         let get_route = format!("/api/masters/username/{}", master.username);
-        let response = get_response_from_route!(&mut app, &get_route);
+        let response = response_from_route!(get, &mut app, &get_route, token);
 
         // Assert the status code and response body
         assert_eq!(response.status(), StatusCode::OK);
@@ -745,6 +808,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_master_by_id_route() {
         let (mut app, pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // First, add a test master
         let master = Master {
@@ -752,7 +816,7 @@ mod tests {
             username: "test_master".to_string(),
             password: "test_password".to_string(),
         };
-        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        let response = response_from_route!(post, &mut app, "/api/masters", token, &master);
         assert_eq!(response.status(), StatusCode::OK);
 
         // Get the master ID
@@ -768,7 +832,7 @@ mod tests {
 
         // Delete the master by ID
         let delete_route = format!("/api/masters/{}", master_id);
-        let response = delete_response_from_route!(&mut app, &delete_route);
+        let response = response_from_route!(delete, &mut app, &delete_route, token);
 
         // Assert the status code
         assert_eq!(response.status(), StatusCode::OK);
@@ -791,6 +855,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_master_by_username_route() {
         let (mut app, pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // First, add a test master
         let master = Master {
@@ -798,12 +863,12 @@ mod tests {
             username: "test_master".to_string(),
             password: "test_password".to_string(),
         };
-        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        let response = response_from_route!(post, &mut app, "/api/masters", token, &master);
         assert_eq!(response.status(), StatusCode::OK);
 
         // Delete the master by username
         let delete_route = format!("/api/masters/username/{}", master.username);
-        let response = delete_response_from_route!(&mut app, &delete_route);
+        let response = response_from_route!(delete, &mut app, &delete_route, token);
 
         // Assert the status code
         assert_eq!(response.status(), StatusCode::OK);
@@ -826,6 +891,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_master_accounts_route() {
         let (mut app, _pool, _node) = create_test_app!().await;
+        let token = get_jwt_token_from_route!(&mut app, "/api/auth/token");
 
         // Add a test master
         let master = Master {
@@ -833,11 +899,11 @@ mod tests {
             username: "test_master".to_string(),
             password: "test_password".to_string(),
         };
-        let response = post_response_from_route!(&mut app, "/api/masters", &master);
+        let response = response_from_route!(post, &mut app, "/api/masters", token, &master);
         assert_eq!(response.status(), StatusCode::OK);
 
         // List masters
-        let response = get_response_from_route!(&mut app, "/api/masters");
+        let response = response_from_route!(get, &mut app, "/api/masters", token);
 
         // Assert the status code and response body
         assert_eq!(response.status(), StatusCode::OK);

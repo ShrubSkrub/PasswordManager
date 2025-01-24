@@ -3,7 +3,9 @@ use actix_service::Service;
 use futures::future::{ok, Ready};
 use actix_web::middleware::{self, Next};
 use actix_web::error::InternalError;
+use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use crate::database;
+use password_manager_shared::models::Claims;
 
 use sqlx::PgPool;
 
@@ -12,35 +14,30 @@ pub async fn auth_master(
     req: ServiceRequest,
     next: Next<impl MessageBody>,
 ) -> Result<ServiceResponse<impl MessageBody>, Error> {
-    let username = req.headers().get("Username").and_then(|v| v.to_str().ok());
-    let password = req.headers().get("Password").and_then(|v| v.to_str().ok());
+    let authorization = req.headers().get("Authorization").and_then(|v| v.to_str().ok());
+    let token = authorization.and_then(|auth| auth.strip_prefix("Bearer "));
 
-    // Check if username and password are provided
-    if let (Some(username), Some(password)) = (username, password) {
-        match database::verify_master_and_get_id(
-            req.app_data::<web::Data<PgPool>>().unwrap(),
-            &username.to_string(),
-            &password.to_string(),
-        )
-        .await
-        {
-            Ok(master_id) => {
+    // Check if authorization header is present
+    if let Some(token) = token {
+        // TODO Update to RSA key pair for DecodingKey
+        match jsonwebtoken::decode::<Claims>(&token, &DecodingKey::from_secret("temporary_secret_key".as_ref()), &Validation::new(Algorithm::HS256)) {
+            Ok(token) => {
                 // Attach the master ID to the request so it can be used later in routes
-                req.extensions_mut().insert(master_id);
+                req.extensions_mut().insert(token.claims.id);
                 next.call(req).await
             }
-            Err(_) => {
+            Err(jwterr) => {
                 let err = InternalError::from_response(
-                    "Invalid credentials",
-                    HttpResponse::Unauthorized().finish(),
+                    format!("Decoding error: {}", jwterr),
+                    HttpResponse::Unauthorized().body(format!("Decoding error: {}", jwterr)),
                 );
                 Err(err.into())
             }
         }
     } else {
         let err = InternalError::from_response(
-            "Missing username or password",
-            HttpResponse::Unauthorized().body("Missing username or password"),
+            "Missing JWT",
+            HttpResponse::Unauthorized().body("Missing JWT"),
         );
         Err(err.into())
     }
