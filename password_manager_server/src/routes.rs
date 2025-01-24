@@ -51,6 +51,15 @@ async fn get_master_id_from_token(req: &HttpRequest) -> Result<i32, HttpResponse
     }
 }
 
+macro_rules! token_to_id {
+    ($req:expr) => {
+        match get_master_id_from_token(&$req).await {
+            Ok(id) => id,
+            Err(e) => return e,
+        }
+    };
+}
+
 #[get("/health")]
 async fn health_check() -> impl Responder {
     HttpResponse::Ok().body("Server is up")
@@ -106,10 +115,7 @@ async fn get_jwt_token(req: actix_web::HttpRequest, pool: web::Data<PgPool>) -> 
 
 #[post("/accounts")]
 async fn add_account(pool: web::Data<PgPool>, account: web::Json<Account>, req: HttpRequest) -> impl Responder {
-    let master_id = match get_master_id_from_token(&req).await {
-        Ok(id) => id,
-        Err(e) => return e
-    };
+    let master_id = token_to_id!(req);
     match database::add_account(&pool, master_id, &account).await {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
