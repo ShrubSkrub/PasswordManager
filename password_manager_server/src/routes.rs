@@ -1,4 +1,4 @@
-use actix_web::{web, HttpResponse, Responder, get, post, delete, patch};
+use actix_web::{delete, get, patch, post, web, HttpMessage, HttpRequest, HttpResponse, Responder};
 use sqlx::PgPool;
 use jsonwebtoken::{Header, EncodingKey};
 
@@ -39,6 +39,16 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             .service(list_master_accounts)
             .service(update_master)
     );
+}
+
+async fn get_master_id_from_token(req: &HttpRequest) -> Result<i32, HttpResponse> {
+    match req.extensions().get::<String>() {
+        Some(id_str) => match id_str.parse::<i32>() {
+            Ok(id) => Ok(id),
+            Err(_) => Err(HttpResponse::InternalServerError().body("Invalid master ID format")),
+        },
+        None => Err(HttpResponse::Unauthorized().body("Unauthorized")),
+    }
 }
 
 #[get("/health")]
@@ -95,8 +105,12 @@ async fn get_jwt_token(req: actix_web::HttpRequest, pool: web::Data<PgPool>) -> 
 }
 
 #[post("/accounts")]
-async fn add_account(pool: web::Data<PgPool>, account: web::Json<Account>) -> impl Responder {
-    match database::add_account(&pool, &account).await {
+async fn add_account(pool: web::Data<PgPool>, account: web::Json<Account>, req: HttpRequest) -> impl Responder {
+    let master_id = match get_master_id_from_token(&req).await {
+        Ok(id) => id,
+        Err(e) => return e
+    };
+    match database::add_account(&pool, master_id, &account).await {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }

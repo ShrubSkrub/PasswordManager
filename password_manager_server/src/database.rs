@@ -32,7 +32,7 @@ pub async fn initialize_db() -> anyhow::Result<PgPool> {
 /// Adds an [`Account`] to the database
 /// 
 /// Does not encrypt the password, must be encrypted before calling this function
-pub async fn add_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
+pub async fn add_account(pool: &PgPool, master_id: i32, account: &Account) -> anyhow::Result<()> {
     // Account id assigned automatically
     match sqlx::query!(
         "INSERT INTO accounts (name, username, password, url, description, master_id) 
@@ -42,7 +42,7 @@ pub async fn add_account(pool: &PgPool, account: &Account) -> anyhow::Result<()>
         account.password,
         account.url,
         account.description,
-        account.master_id
+        master_id
     )
     .execute(pool)
     .await
@@ -488,7 +488,7 @@ mod tests {
 
         let account = create_test_account();
 
-        let result = add_account(&pool, &account).await;
+        let result = add_account(&pool, 1, &account).await;
         assert!(result.is_ok());
 
         // Check if the account was really added
@@ -519,10 +519,10 @@ mod tests {
         account2.name = "test_account_2".to_string();
         account2.username = "test_user_2".to_string();
 
-        let result1 = add_account(&pool, &account1).await;
+        let result1 = add_account(&pool, 1, &account1).await;
         assert!(result1.is_ok());
 
-        let result2 = add_account(&pool, &account2).await;
+        let result2 = add_account(&pool, 1, &account2).await;
         assert!(result2.is_ok());
 
         // Check if the first account was really added
@@ -567,9 +567,9 @@ mod tests {
 
         let account = create_test_account();
 
-        add_account(&pool, &account).await.expect("Failed to add account");
+        add_account(&pool, 1, &account).await.expect("Failed to add account");
 
-        let result = add_account(&pool, &account).await;
+        let result = add_account(&pool, 1, &account).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "Name must be unique");
     }
@@ -582,7 +582,7 @@ mod tests {
         let mut account = create_test_account();
         account.master_id = 999; // Non-existent master_id
 
-        let result = add_account(&pool, &account).await;
+        let result = add_account(&pool, 999, &account).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "Master ID must exist in the masters table");
     }
@@ -595,21 +595,21 @@ mod tests {
         let mut account = create_test_account();
         account.name = "".to_string(); // Name is required
 
-        let result = add_account(&pool, &account).await;
+        let result = add_account(&pool, 1, &account).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "Name is required");
 
         account.name = "test_account".to_string();
         account.username = "".to_string(); // Username is required
 
-        let result = add_account(&pool, &account).await;
+        let result = add_account(&pool, 1, &account).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "Username is required");
 
         account.username = "test_user".to_string();
         account.password = "".to_string(); // Password is required
 
-        let result = add_account(&pool, &account).await;
+        let result = add_account(&pool, 1, &account).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "Password is required");
     }
@@ -622,7 +622,7 @@ mod tests {
         let mut account = create_test_account();
         account.master_id = "invalid".parse().unwrap_or(0); // Invalid master_id type
 
-        let result = add_account(&pool, &account).await;
+        let result = add_account(&pool, 0, &account).await;
         assert!(result.is_err());
     }
     /// Adds an account to the database and checks if it was added using get_account_by_id
@@ -632,7 +632,7 @@ mod tests {
 
         let account = create_test_account();
 
-        add_account(&pool, &account).await.expect("Failed to add account");
+        add_account(&pool, 1, &account).await.expect("Failed to add account");
 
         let fetched_account = get_account_by_id(&pool, 1).await.expect("Failed to get account by id");
         assert_eq!(fetched_account.name, account.name);
@@ -670,7 +670,7 @@ mod tests {
         let (pool, _node) = setup_database().await.unwrap();
 
         let account = create_test_account();
-        add_account(&pool, &account).await.expect("Failed to add account");
+        add_account(&pool, 1, &account).await.expect("Failed to add account");
 
         let old_master = get_master_by_id(&pool, 1).await.expect("Failed to get master by id");
 
