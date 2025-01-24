@@ -234,6 +234,7 @@ async fn list_master_accounts(pool: web::Data<PgPool>) -> impl Responder {
     }
 }
 
+/// TODO Have this route take in a master id and needed database updates
 #[patch("/masters")]
 async fn update_master(_pool: web::Data<PgPool>, _master: web::Json<Master>) -> impl Responder {
     HttpResponse::NotImplemented().body("Unimplemented!")

@@ -395,6 +395,8 @@ pub async fn list_master_accounts(pool: &PgPool) -> anyhow::Result<Vec<Master>> 
 /// [`old_master`].password and [`new_master`].password must be **plaintext**
 ///
 /// Returns an error if the UPDATE query fails or if the re-encryption of the account passwords fails
+///
+/// TODO Move this function to client-side; the database should not take in plaintext passwords
 pub async fn update_master(pool: &PgPool, old_master: &Master, new_master: &Master) -> anyhow::Result<()> {
     let hashed_password = hash_master_password(&new_master.password).expect("Error hashing password");
     let query_result = sqlx::query!(
