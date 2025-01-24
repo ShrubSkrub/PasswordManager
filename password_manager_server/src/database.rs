@@ -80,11 +80,12 @@ pub async fn add_account(pool: &PgPool, master_id: i32, account: &Account) -> an
 /// Returns an [`Account`] from the database by its id
 ///
 /// Password is base64 encoded and encrypted, must be decoded before use
-pub async fn get_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Account> {
+pub async fn get_account_by_id(pool: &PgPool, master_id: i32, id: i32) -> anyhow::Result<Account> {
     let account = sqlx::query_as!(Account,
         "SELECT id, name, username, password, url, description, master_id
-        FROM accounts WHERE id = $1",
-        id
+        FROM accounts WHERE id = $1 AND master_id = $2",
+        id,
+        master_id
     )
     .fetch_one(pool)
     .await?;
@@ -95,11 +96,12 @@ pub async fn get_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<Account
 /// Returns an [`Account`] from the database by its name
 /// 
 /// Password is base64 encoded and encrypted, must be decoded before use
-pub async fn get_account_by_name(pool: &PgPool, name: &String) -> anyhow::Result<Account> {
+pub async fn get_account_by_name(pool: &PgPool, master_id: i32, name: &String) -> anyhow::Result<Account> {
     let row = sqlx::query!(
         "SELECT id, name, username, password, url, description, master_id
-        FROM accounts WHERE name = $1",
-        name
+        FROM accounts WHERE name = $1 AND master_id = $2",
+        name,
+        master_id
     )
     .fetch_one(pool)
     .await?;
@@ -118,12 +120,13 @@ pub async fn get_account_by_name(pool: &PgPool, name: &String) -> anyhow::Result
 }
 
 // TODO Make return account, and handle printing in user_interface.rs instead
-pub async fn delete_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<()> {
-    match get_account_by_id(pool, id).await {
+pub async fn delete_account_by_id(pool: &PgPool, master_id: i32, id: i32) -> anyhow::Result<()> {
+    match get_account_by_id(pool, master_id, id).await {
         Ok(returned_account) => {
             let query_result = sqlx::query!(
-                "DELETE FROM accounts WHERE id = $1",
-                id
+                "DELETE FROM accounts WHERE id = $1 AND master_id = $2",
+                id,
+                master_id
             )
             .execute(pool)
             .await?;
@@ -144,12 +147,13 @@ pub async fn delete_account_by_id(pool: &PgPool, id: i32) -> anyhow::Result<()> 
 }
 
 // TODO Make return account, and handle printing in user_interface.rs instead
-pub async fn delete_account_by_name(pool: &PgPool, name: &String) -> anyhow::Result<()> {
-    match get_account_by_name(pool, name).await {
+pub async fn delete_account_by_name(pool: &PgPool, master_id: i32, name: &String) -> anyhow::Result<()> {
+    match get_account_by_name(pool, master_id, name).await {
         Ok(returned_account) => {
             let query_result = sqlx::query!(
-                "DELETE FROM accounts WHERE name = $1",
-                name
+                "DELETE FROM accounts WHERE name = $1 AND master_id = $2",
+                name,
+                master_id
             )
             .execute(pool)
             .await?;
@@ -173,10 +177,11 @@ pub async fn delete_account_by_name(pool: &PgPool, name: &String) -> anyhow::Res
 /// [`AccountSummary`] from the database
 /// 
 /// TODO Add a function for pagination
-pub async fn list_accounts(pool: &PgPool) -> anyhow::Result<Vec<AccountSummary>> {
+pub async fn list_accounts(pool: &PgPool, master_id: i32) -> anyhow::Result<Vec<AccountSummary>> {
     // List all account ids, names, and descriptions from the database
     let summaries = sqlx::query_as!(AccountSummary,
-        "SELECT id, name, description FROM accounts"
+        "SELECT id, name, description FROM accounts WHERE master_id = $1",
+        master_id
     )
     .fetch_all(pool)
     .await?;
@@ -188,11 +193,12 @@ pub async fn list_accounts(pool: &PgPool) -> anyhow::Result<Vec<AccountSummary>>
 /// [`AccountSummary`] from the database
 /// 
 /// TODO Add a function for pagination
-pub async fn search_accounts(pool: &PgPool, search_term: &String) -> anyhow::Result<Vec<AccountSummary>> {
+pub async fn search_accounts(pool: &PgPool, master_id: i32, search_term: &String) -> anyhow::Result<Vec<AccountSummary>> {
     let summaries = sqlx::query_as!(AccountSummary,
         "SELECT id, name, description 
         FROM accounts 
-        WHERE name ILIKE $1 OR description ILIKE $1",
+        WHERE master_id = $1 AND (name ILIKE $2 OR description ILIKE $2)",
+        master_id,
         format!("%{}%", search_term)
     )
     .fetch_all(pool)
@@ -204,18 +210,19 @@ pub async fn search_accounts(pool: &PgPool, search_term: &String) -> anyhow::Res
 /// Updates an account with the given id to the values of the given [`Account`]
 /// 
 /// Returns an error if the UPDATE query fails
-pub async fn update_account(pool: &PgPool, account: &Account) -> anyhow::Result<()> {
+pub async fn update_account(pool: &PgPool, master_id: i32, account: &Account) -> anyhow::Result<()> {
     let query_result = sqlx::query!(
         "UPDATE accounts 
         SET name = $1, username = $2, password = $3, url = $4, description = $5, master_id = $6
-        WHERE id = $7",
+        WHERE id = $7 AND master_id = $8",
         account.name,
         account.username,
         account.password,
         account.url,
         account.description,
         account.master_id,
-        account.id
+        account.id,
+        master_id
     )
     .execute(pool)
     .await?; 
@@ -230,7 +237,7 @@ pub async fn update_account(pool: &PgPool, account: &Account) -> anyhow::Result<
 /// Helper function for [`update_master`]
 /// 
 /// Reads each input [`ids_and_passwords`] tuple and updates the password for the account with the given id
-async fn update_accounts_passwords(pool: &PgPool, ids_and_passwords: &Vec<(i32, String)>) -> anyhow::Result<()> {
+pub async fn update_accounts_passwords(pool: &PgPool, master_id: i32, ids_and_passwords: &Vec<(i32, String)>) -> anyhow::Result<()> {
     let mut query = String::from("UPDATE accounts SET password = CASE id ");
     let mut ids = Vec::new();
 
@@ -239,7 +246,7 @@ async fn update_accounts_passwords(pool: &PgPool, ids_and_passwords: &Vec<(i32, 
         ids.push(id);
     }
 
-    query.push_str("END WHERE id IN (");
+    query.push_str("END WHERE master_id = $1 AND id IN (");
     for (i, id) in ids.iter().enumerate() {
         if i > 0 {
             query.push_str(", ");
@@ -248,7 +255,7 @@ async fn update_accounts_passwords(pool: &PgPool, ids_and_passwords: &Vec<(i32, 
     }
     query.push_str(")");
 
-    let query_result = sqlx::query(&query).execute(pool).await?;
+    let query_result = sqlx::query(&query).bind(master_id).execute(pool).await?;
 
     if query_result.rows_affected() == 0 {
         return Err(anyhow::anyhow!("UPDATE failed: Query returned no rows"));
@@ -427,7 +434,7 @@ pub async fn update_master(pool: &PgPool, old_master: &Master, new_master: &Mast
             }
         }
     }
-    update_accounts_passwords(pool, &ids_and_encrypted_pass).await?;
+    update_accounts_passwords(pool, old_master.id, &ids_and_encrypted_pass).await?;
 
     Ok(())
 }
@@ -480,7 +487,6 @@ mod tests {
 
     use super::*;
 
-    
     /// Adds an account to the database and checks if it was added using SQL
     #[tokio::test]
     async fn test_add_account() {
@@ -625,6 +631,7 @@ mod tests {
         let result = add_account(&pool, 0, &account).await;
         assert!(result.is_err());
     }
+
     /// Adds an account to the database and checks if it was added using get_account_by_id
     #[tokio::test]
     async fn test_get_account_by_id() {
@@ -634,7 +641,7 @@ mod tests {
 
         add_account(&pool, 1, &account).await.expect("Failed to add account");
 
-        let fetched_account = get_account_by_id(&pool, 1).await.expect("Failed to get account by id");
+        let fetched_account = get_account_by_id(&pool, 1, 1).await.expect("Failed to get account by id");
         assert_eq!(fetched_account.name, account.name);
         assert_eq!(fetched_account.username, account.username);
         assert_eq!(fetched_account.password, account.password);
@@ -693,11 +700,9 @@ mod tests {
 
         assert_eq!(verify_master(&pool, &new_master.username, &new_master.password).await.expect("Failed to verify new master account"), true);
 
-        let updated_account = get_account_by_id(&pool, 1).await.expect("Failed to get account by id");
+        let updated_account = get_account_by_id(&pool, 1, 1).await.expect("Failed to get account by id");
         let decrypted_password = decrypt_password(&new_master.password, &updated_account.password).expect("Failed to decrypt password");
         // Update this value if create_test_account() changes
         assert_eq!(decrypted_password, "test_account_password123!!");
     }
-
-
 }

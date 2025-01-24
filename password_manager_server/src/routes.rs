@@ -31,6 +31,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             .service(search_accounts)
             .service(update_account)
             // Masters routes
+            // TODO Split masters routes into their own module with their own authentication middleware
             .service(add_master)
             .service(get_master_by_id)
             .service(get_master_by_username)
@@ -123,56 +124,63 @@ async fn add_account(pool: web::Data<PgPool>, account: web::Json<Account>, req: 
 }
 
 #[get("/accounts/{id}")]
-async fn get_account_by_id(pool: web::Data<PgPool>, id: web::Path<i32>) -> impl Responder {
-    match database::get_account_by_id(&pool, id.into_inner()).await {
+async fn get_account_by_id(pool: web::Data<PgPool>, id: web::Path<i32>, req: HttpRequest) -> impl Responder {
+    let master_id = token_to_id!(req);
+    match database::get_account_by_id(&pool, master_id, id.into_inner()).await {
         Ok(account) => HttpResponse::Ok().json(account),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 
 #[get("/accounts/name/{name}")]
-async fn get_account_by_name(pool: web::Data<PgPool>, name: web::Path<String>) -> impl Responder {
-    match database::get_account_by_name(&pool, &name).await {
+async fn get_account_by_name(pool: web::Data<PgPool>, name: web::Path<String>, req: HttpRequest) -> impl Responder {
+    let master_id = token_to_id!(req);
+    match database::get_account_by_name(&pool, master_id, &name).await {
         Ok(account) => HttpResponse::Ok().json(account),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 
 #[delete("/accounts/{id}")]
-async fn delete_account_by_id(pool: web::Data<PgPool>, id: web::Path<i32>) -> impl Responder {
-    match database::delete_account_by_id(&pool, id.into_inner()).await {
+async fn delete_account_by_id(pool: web::Data<PgPool>, id: web::Path<i32>, req: HttpRequest) -> impl Responder {
+    let master_id = token_to_id!(req);
+    match database::delete_account_by_id(&pool, master_id, id.into_inner()).await {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 
 #[delete("/accounts/name/{name}")]
-async fn delete_account_by_name(pool: web::Data<PgPool>, name: web::Path<String>) -> impl Responder {
-    match database::delete_account_by_name(&pool, &name).await {
+async fn delete_account_by_name(pool: web::Data<PgPool>, name: web::Path<String>, req: HttpRequest) -> impl Responder {
+    let master_id = token_to_id!(req);
+    match database::delete_account_by_name(&pool, master_id, &name).await {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 
 #[get("/accounts")]
-async fn list_accounts(pool: web::Data<PgPool>) -> impl Responder {
-    match database::list_accounts(&pool).await {
+async fn list_accounts(pool: web::Data<PgPool>, req: HttpRequest) -> impl Responder {
+    let master_id = token_to_id!(req);
+    match database::list_accounts(&pool, master_id).await {
         Ok(accounts) => HttpResponse::Ok().json(accounts),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 
 #[get("/accounts/search/{term}")]
-async fn search_accounts(pool: web::Data<PgPool>, search_term: web::Path<String>) -> impl Responder {
-    match database::search_accounts(&pool, &search_term).await {
+async fn search_accounts(pool: web::Data<PgPool>, search_term: web::Path<String>, req: HttpRequest) -> impl Responder {
+    let master_id = token_to_id!(req);
+    match database::search_accounts(&pool, master_id, &search_term).await {
         Ok(accounts) => HttpResponse::Ok().json(accounts),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 
 #[patch("/accounts")]
-async fn update_account(pool: web::Data<PgPool>, account: web::Json<Account>) -> impl Responder {
-    match database::update_account(&pool, &account).await {
+async fn update_account(pool: web::Data<PgPool>, account: web::Json<Account>, req: HttpRequest) -> impl Responder {
+    let master_id = token_to_id!(req);
+    match database::update_account(&pool, master_id, &account).await {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
