@@ -1,21 +1,11 @@
 # Password Manager
-A simple password manager built for fun in Rust. This application securely stores your passwords using AES-GCM encryption for passwords and Argon2 for password hashing. All data is stored locally in a PostgreSQL database, allowing for ease of use.
+A simple password manager built for fun in Rust. This application securely stores your passwords using AES-GCM encryption for passwords and Argon2 for password hashing. All data is stored in a PostgreSQL database, which can be communicated with using a RESTful API.
 
-The system supports basic CRUD operations. Other features such as MFA and toolchain support may come later. (Maybe even a real UI!)
+The system supports basic CRUD operations. Other features such as MFA and toolchain support may come later.
 
-Main Menu:
-```
-Password Manager:
-1. List accounts
-2. Search accounts
-3. Get account details
-4. Add account
-5. Update account
-6. Delete account
-7. Change master password
-x. Exit
-Please choose an option: 
-```
+Look at [routes.rs](password_manager_server/src/routes.rs) for the current list of API endpoints
+
+The end goal is to deploy this on AWS and provide a website for users to access it.
 
 ## Security Overview
 
@@ -44,15 +34,16 @@ You can use the provided `db_setup.sh` script to setup the Postgres database.
 Make sure to adjust the configuration in the script if necessary.
 
 ## Running the Application
-Run program with:
+Instructions to come later.
 
-```bash
-cargo run
-```
-
-This will start the password manager and present you with the main menu.
+The system has multiple parts that will need to be started to run:
+- The database
+- The backend
+- The frontend
 
 ## Dependencies
+
+*NOTE This list is currently unfinished; there are more dependencies*
 
 | Dependency     | Description                                      |
 |----------------|--------------------------------------------------|
