@@ -333,53 +333,6 @@ mod tests {
         };
     }
 
-    /// Legacy macro
-    #[macro_export]
-    macro_rules! post_response_from_route {
-        ($app:expr, $route:expr, $json:expr) => {
-            {
-                let req = TestRequest::post()
-                    .uri($route)
-                    .set_json($json)
-                    .to_request();
-        
-                // Send the request and check the response
-                test::call_service($app, req).await
-            }
-        };
-    }
-
-    /// Legacy macro
-    #[macro_export]
-    macro_rules! delete_response_from_route {
-        ($app:expr, $route:expr) => {
-            {
-                let req = TestRequest::delete()
-                    .uri($route)
-                    .to_request();
-        
-                // Send the request and check the response
-                test::call_service($app, req).await
-            }
-        };
-    }
-
-    /// Legacy macro
-    #[macro_export]
-    macro_rules! patch_response_from_route {
-        ($app:expr, $route:expr, $json:expr) => {
-            {
-                let req = TestRequest::patch()
-                    .uri($route)
-                    .set_json($json)
-                    .to_request();
-        
-                // Send the request and check the response
-                test::call_service($app, req).await
-            }
-        };
-    }
-
     #[tokio::test]
     async fn test_db_health_check_route() {
         let (mut app, _pool, _node) = create_test_app!().await;

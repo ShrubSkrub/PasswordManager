@@ -1,14 +1,8 @@
-use actix_web::{body::MessageBody, dev::{ServiceRequest, ServiceResponse}, web, Error, HttpMessage, HttpRequest, HttpResponse, Result};
-use actix_service::Service;
-use futures::future::{ok, Ready};
-use actix_web::middleware::{self, Next};
+use actix_web::{body::MessageBody, dev::{ServiceRequest, ServiceResponse}, Error, HttpMessage, HttpResponse, Result};
+use actix_web::middleware::Next;
 use actix_web::error::InternalError;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-use crate::database;
 use password_manager_shared::models::Claims;
-
-use sqlx::PgPool;
-
 
 pub async fn auth_master(
     req: ServiceRequest,
